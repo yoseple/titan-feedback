@@ -1,4 +1,5 @@
-import { db } from "../lib/firebase";
+import { db, app } from "../lib/firebase"; 
+import { getFunctions, httpsCallable } from "firebase/functions"; 
 import { 
   doc, 
   setDoc, 
@@ -10,34 +11,28 @@ import {
   orderBy, 
   getDocs 
 } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "../lib/firebase";
+
+// FIX: Align with useTitanData and your DB Rules
+const APP_ID = "titan-73b02";
 
 // --- PROFILE & SETTINGS ---
 
 export const updateUserProfile = async (uid, data) => {
-  const userRef = doc(db, "users", uid);
+  const userRef = doc(db, 'artifacts', APP_ID, 'users', uid);
   await setDoc(userRef, data, { merge: true });
 };
 
-// Get User Profile Data
 export const getUserProfile = async (uid) => {
-  const userRef = doc(db, "users", uid);
+  const userRef = doc(db, 'artifacts', APP_ID, 'users', uid);
   const snap = await getDoc(userRef);
-  
-  if (snap.exists()) {
-    // Returning User: Return their data
-    return snap.data();
-  } else {
-    // New User: Return NULL to trigger Onboarding Wizard
-    return null; 
-  }
+  if (snap.exists()) return snap.data();
+  return null; 
 };
 
 // --- DIET TRACKER LOGS ---
 
 export const addFoodLog = async (uid, foodItem) => {
-  const logsRef = collection(db, "users", uid, "logs");
+  const logsRef = collection(db, 'artifacts', APP_ID, 'users', uid, 'food_logs');
   await addDoc(logsRef, {
     ...foodItem,
     date: new Date().toISOString(),
@@ -46,7 +41,7 @@ export const addFoodLog = async (uid, foodItem) => {
 };
 
 export const getTodayLogs = async (uid) => {
-  const logsRef = collection(db, "users", uid, "logs");
+  const logsRef = collection(db, 'artifacts', APP_ID, 'users', uid, 'food_logs');
   const startOfDay = new Date();
   startOfDay.setHours(0,0,0,0);
   const endOfDay = new Date();
@@ -65,11 +60,12 @@ export const getTodayLogs = async (uid) => {
 
 // --- TICKET SYSTEM ---
 export const submitSupportTicket = async (ticketData) => {
-  const functions = getFunctions(app, "us-central1");
+  const { subject, message, type } = ticketData;
+  const functions = getFunctions(app, "us-central1"); 
   const submitTicket = httpsCallable(functions, 'submitTicket');
-  
+
   try {
-    const result = await submitTicket(ticketData);
+    const result = await submitTicket({ subject, message, type });
     return result.data;
   } catch (error) {
     console.error("Ticket Submission Failed:", error);

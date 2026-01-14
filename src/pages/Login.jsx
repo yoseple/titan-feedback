@@ -1,20 +1,34 @@
 // src/pages/Login.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { googleLogin } = useAuth(); // <--- Use the new function
+  const { googleLogin, currentUser } = useAuth(); // Destructure currentUser
   const navigate = useNavigate();
+
+  // FIX: Watch for currentUser changes. 
+  // This ensures we only redirect when Firebase has firmly established the session.
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/');
+    }
+  }, [currentUser, navigate]);
 
   async function handleGoogleSignIn() {
     try {
       setError('');
       setLoading(true);
+      
+      // We wait for the popup flow to complete
       await googleLogin();
-      navigate('/'); // Go to Dashboard
+      
+      // IMPORTANT: Do NOT navigate() here.
+      // The useEffect above will detect the new user and redirect automatically.
+      // This prevents the "No user" race condition in PrivateRoute.
+      
     } catch (err) {
       console.error(err);
       setError('Failed to sign in with Google.');

@@ -1,46 +1,50 @@
+// src/lib/ai.js
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "./firebase"; // This works now because we added 'export' in Step 1
+import { app } from "./firebase"; 
 
-// Initialize Cloud Functions (Region must match your deploy, usually 'us-central1')
+// Initialize Cloud Functions
 const functions = getFunctions(app, "us-central1");
 
 /**
- * Calls the 'generateAI' Cloud Function securely.
- * @param {string} prompt - The text prompt to send to Gemini.
- * @returns {Promise<Object|null>} - The parsed JSON response from AI.
+ * Calls the 'generateAI' Cloud Function.
+ * Includes robust parsing to handle Markdown wrappers and conversational fluff.
  */
-export const generateContent = async (prompt) => {
-  // Reference the 'generateAI' function we deployed to the cloud
+export const generateContent = async (prompt, type = 'chat') => {
   const generateAI = httpsCallable(functions, 'generateAI');
 
   try {
-    // 1. Call the Cloud Function
-    // The Cloud Function expects { prompt: "..." } in the body
-    const result = await generateAI({ prompt });
-    
-    // 2. Extract Data
-    // The Cloud Function returns the raw text string in result.data
+    const result = await generateAI({ prompt, type });
     let text = result.data;
 
-    if (!text) {
-      console.warn("AI returned empty response.");
-      return null;
+    // 1. Safety Check
+    if (!text || typeof text !== 'string') return null;
+
+    // 2. The "Markdown Stripper" Fix
+    // Sometimes AI returns ```json ... ```. We must remove that wrapper.
+    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+
+    // 3. Surgical Extraction: Find the JSON object inside the text
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      // Grab everything between the first { and the last }
+      const jsonString = text.substring(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(jsonString);
+      } catch (e) {
+        console.warn("JSON cleanup failed, trying raw text...");
+      }
     }
 
-    // 3. Clean Markdown Formatting
-    // Gemini often wraps JSON in ```json ... ``` code blocks. We must remove them.
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    // 4. Parse & Return JSON
+    // 4. Fallback: Try parsing the cleaned text directly
     return JSON.parse(text);
 
   } catch (error) {
     console.error("Cloud AI Failed:", error);
 
-    // Check for the specific Rate Limit error we threw in the backend
     if (error.message && error.message.includes('resource-exhausted')) {
-      // You can let the UI handle this, or throw a specific error text
-      throw new Error("Daily limit reached (30/30). Please try again tomorrow.");
+      throw new Error(`Daily ${type} limit reached.`);
     }
 
     return null;

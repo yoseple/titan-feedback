@@ -1,24 +1,22 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-// We include analytics since you have it, though Titan mainly uses DB/Auth
 import { getAnalytics } from "firebase/analytics"; 
 
+// FIX: Hardcoded keys to guarantee connection on Localhost & Mobile
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+  apiKey: "AIzaSyAbXeadJcYu4KRfoAJGxm8rhVnG4oMrd1I",
+  authDomain: "titan-73b02.firebaseapp.com",
+  projectId: "titan-73b02",
+  storageBucket: "titan-73b02.firebasestorage.app",
+  messagingSenderId: "191700664948",
+  appId: "1:191700664948:web:15f88fa61f8478f5ad4721",
+  measurementId: "G-4M3T6YZEZG"
 };
 
 // Initialize Firebase
 export const app = initializeApp(firebaseConfig);
-
-// Export the services so the rest of the app can use them
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const analytics = getAnalytics(app);
-export const appId = 'titan-73b02'; // Your specific project ID for data nesting
+export const appId = 'titan-73b02';

@@ -3,21 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Dumbbell, Utensils, Flame, Loader, Trash2, Activity, Edit2, 
   ChevronLeft, ChevronRight, Send, Bot, Settings, Plus, Check, 
-  ShoppingCart, X, Scan
+  ShoppingCart, X, Scan, Scale, RefreshCw, ChevronDown, Wand2
 } from 'lucide-react';
 
 // --- IMPORTS ---
 import { generateContent } from '../lib/ai';
 import { INITIAL_MEALS } from '../data/defaults';
 import { useTitanData } from '../hooks/useTitanData'; 
-import { categorizeFood, searchUSDA, calculateTDEE } from '../utils/nutrition'; 
+import { categorizeFood, searchUSDA, calculateTDEE, searchAI } from '../utils/nutrition'; 
 
 // --- MODALS & COMPONENTS ---
-import Onboarding from './modals/Onboarding'; // <--- NEW WIZARD IMPORT
+import Onboarding from './modals/Onboarding'; 
 import LiftHistoryModal from './modals/LiftHistoryModal';
 import WorkoutDayEditor from './modals/WorkoutDayEditor';
 import ChefMode from './modals/ChefMode';
-import ProfileModal from './modals/ProfileModal';
 import AddFoodModal from './modals/AddFoodModal'; 
 import ConsistencyHeatmap from './charts/ConsistencyHeatmap';
 import CalorieDashboard from './charts/CalorieDashboard';
@@ -26,14 +25,14 @@ import MealCard from './cards/MealCard';
 
 const MEAL_SECTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 
-// Helper: Fix Date Offsets for Mobile Safari
+// --- HELPERS ---
+
 const getLocalDate = (date) => {
   const d = new Date(date);
   const offset = d.getTimezoneOffset() * 60000;
   return (new Date(d - offset)).toISOString().slice(0, 10);
 };
 
-// Helper: Safely extract numbers from messy database strings
 const cleanMacro = (val) => {
   if (typeof val === 'number') return val;
   if (!val) return 0;
@@ -41,7 +40,57 @@ const cleanMacro = (val) => {
   return match ? Math.round(parseFloat(match[0])) : 0;
 };
 
-// Helper: Normalize different API data shapes (USDA vs OpenFoodFacts)
+// IMPROVED: Detects base weight from strings like "1 cup (158g)" or "100g"
+const getBaseGramWeight = (weightStr) => {
+    if (!weightStr) return null;
+    const str = weightStr.toLowerCase().trim();
+    
+    // 1. Look for explicit parenthesis format: "1 cup (158g)"
+    const parenMatch = str.match(/\((\d+(\.\d+)?)\s*g\)/);
+    if (parenMatch) return parseFloat(parenMatch[1]);
+
+    // 2. Look for explicit gram start: "100g", "100 g"
+    const gramMatch = str.match(/^(\d+(\.\d+)?)\s*g/);
+    if (gramMatch) return parseFloat(gramMatch[1]);
+
+    // 3. Look for Ounce format and convert: "4 oz"
+    const ozMatch = str.match(/^(\d+(\.\d+)?)\s*oz/);
+    if (ozMatch) return parseFloat(ozMatch[1]) * 28.3495;
+
+    return null; 
+};
+
+// MATH HELPER: Safe Unit Conversion (FIXED LOGIC)
+const convertQuantity = (amount, fromUnit, toUnit, baseWeightInGrams) => {
+    // 1. Constants
+    const OZ = 28.3495;
+    const FLOZ = 29.5735;
+
+    // 2. Normalize to Grams first
+    // This logic is now independent of baseWeight if moving between g/oz/floz
+    let grams = 0;
+    
+    if (fromUnit === 'g') grams = amount;
+    else if (fromUnit === 'oz') grams = amount * OZ;
+    else if (fromUnit === 'floz') grams = amount * FLOZ;
+    else if (fromUnit === 'serving') {
+        // Only need base weight if coming FROM a serving
+        if (!baseWeightInGrams) return amount; 
+        grams = amount * baseWeightInGrams;
+    }
+
+    // 3. Convert Grams to Target
+    if (toUnit === 'g') return Math.round(grams); // Round grams to integer
+    if (toUnit === 'oz') return parseFloat((grams / OZ).toFixed(2));
+    if (toUnit === 'floz') return parseFloat((grams / FLOZ).toFixed(2));
+    if (toUnit === 'serving') {
+        if (!baseWeightInGrams) return amount;
+        return parseFloat((grams / baseWeightInGrams).toFixed(2));
+    }
+
+    return amount;
+};
+
 const normalizeFoodData = (item) => {
     let cleanItem = {
         ...item,
@@ -52,7 +101,6 @@ const normalizeFoodData = (item) => {
         weight_amount: item.weight || item.weight_amount || item.amount || "1 serving"
     };
 
-    // Auto-sum ingredients if main macros are missing
     if (cleanItem.ingredients && Array.isArray(cleanItem.ingredients)) {
         cleanItem.ingredients = cleanItem.ingredients.map(ing => ({
             ...ing,
@@ -74,9 +122,26 @@ const normalizeFoodData = (item) => {
     return cleanItem;
 };
 
+// Helper to normalize day IDs
+const normalizeId = (input) => {
+    if (!input) return null;
+    const lower = input.toLowerCase().trim();
+    if (["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].includes(lower)) {
+        return lower;
+    }
+    const map = {
+        "mon": "monday", "tue": "tuesday", "tues": "tuesday", 
+        "wed": "wednesday", "weds": "wednesday", 
+        "thu": "thursday", "thur": "thursday", "thurs": "thursday",
+        "fri": "friday", "sat": "saturday", "sun": "sunday"
+    };
+    return map[lower] || lower; 
+};
+
+// --- MAIN COMPONENT ---
+
 const Dashboard = () => {
   const navigate = useNavigate();
-  // useTitanData handles all Firebase loading automatically
   const { user, authLoading, workouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, actions } = useTitanData();
   
   const [activeTab, setActiveTab] = useState('workouts');
@@ -85,7 +150,6 @@ const Dashboard = () => {
   // UI State
   const [chefMeal, setChefMeal] = useState(null); 
   const [editingDayId, setEditingDayId] = useState(null); 
-  const [showProfileModal, setShowProfileModal] = useState(false); // Legacy modal (can be removed if using Settings page)
   const [showLiftHistory, setShowLiftHistory] = useState(null);
   
   // Diet State
@@ -95,26 +159,29 @@ const Dashboard = () => {
   const [isFoodSearching, setIsFoodSearching] = useState(false); 
   const [editorSearchQuery, setEditorSearchQuery] = useState('');
   const [editorSearchResults, setEditorSearchResults] = useState([]);
+  const [isEditorSearching, setIsEditorSearching] = useState(false);
+  const [swappingIngIndex, setSwappingIngIndex] = useState(null); 
+  const [isAiGeneratingIng, setIsAiGeneratingIng] = useState(false);
 
   // Tracker State
   const [addingToMeal, setAddingToMeal] = useState(null); 
   const [scannedResult, setScannedResult] = useState(null);
+  
+  // --- SMART UNIT STATE ---
   const [numServings, setNumServings] = useState(1);
+  const [servingUnit, setServingUnit] = useState('serving'); // 'serving', 'g', 'oz', 'floz'
 
   // Chat State
   const [chatInput, setChatInput] = useState('');
-  const [chatHistory, setChatHistory] = useState([{ role: 'ai', content: "I am Titan V23. I can update your workout plans and help with diet." }]);
+  const [chatHistory, setChatHistory] = useState([{ role: 'ai', content: "I am Titan. I can update your workout plans and create meals for you." }]);
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const chatEndRef = useRef(null);
 
-  // Auto-scroll chat to bottom
   useEffect(() => { 
     if (activeTab === 'coach') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
   }, [chatHistory, activeTab]);
 
   // --- ACTIONS ---
-  // Around line 125 in Dashboard.jsx
-const [isEditorSearching, setIsEditorSearching] = useState(false);
 
   const handleFoodAddFromModal = (foodItem) => {
       const cleanData = normalizeFoodData(foodItem);
@@ -125,111 +192,220 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
          carbs: cleanData.carbs, 
          fats: cleanData.fats,
          weight_amount: cleanData.weight_amount
-      }, getLocalDate(viewDate), addingToMeal); // <--- Ensure this calls getLocalDate(viewDate)
+      }, getLocalDate(viewDate), addingToMeal); 
       setAddingToMeal(null);
   };
 
-  const getDisplayMacros = () => {
+  const handleFoodSelect = (foodItem) => {
+      const clean = normalizeFoodData(foodItem);
+      setScannedResult(clean);
+      setAddingToMeal(foodItem.targetMeal || addingToMeal); 
+      
+      // Default to 'g' logic
+      setServingUnit('g');
+      if (clean.weight_amount === '100g' || clean.weight_amount.toLowerCase().startsWith('100g')) {
+          setNumServings(100);
+      } else {
+          const base = getBaseGramWeight(clean.weight_amount);
+          setNumServings(base || 100); 
+      }
+  };
+
+  // --- SMART CALCULATOR ---
+  const calculationData = useMemo(() => {
       if (!scannedResult) return { c:0, p:0, ca:0, f:0 };
-      const base = normalizeFoodData(scannedResult);
-      const multiplier = numServings > 0 ? numServings : 0;
+      
+      const baseWeight = getBaseGramWeight(scannedResult.weight_amount);
+      const base = scannedResult; 
+      
+      let multiplier = 1;
+
+      if (servingUnit === 'serving') {
+          multiplier = numServings;
+      } 
+      else if (baseWeight) {
+          let inputInGrams = numServings;
+          if (servingUnit === 'oz') inputInGrams = numServings * 28.3495;
+          if (servingUnit === 'floz') inputInGrams = numServings * 29.5735;
+          
+          multiplier = inputInGrams / baseWeight;
+      }
+
       return {
           c: Math.round(base.calories * multiplier),
           p: Math.round(base.protein * multiplier),
           ca: Math.round(base.carbs * multiplier),
           f: Math.round(base.fats * multiplier),
+          baseWeight 
       };
+  }, [scannedResult, numServings, servingUnit]);
+
+  // --- UNIT SWITCHER ---
+  const handleUnitChange = (newUnit) => {
+      if (!scannedResult) return;
+      const baseWeight = getBaseGramWeight(scannedResult.weight_amount);
+      const newAmount = convertQuantity(numServings, servingUnit, newUnit, baseWeight);
+      
+      setNumServings(newAmount);
+      setServingUnit(newUnit);
   };
 
   const handleScanConfirm = () => {
       if (!scannedResult) return;
-      const totals = getDisplayMacros();
-      const baseAmount = scannedResult.weight_amount || scannedResult.weight || '1 serving';
-      const finalWeightLabel = `${numServings} x ${baseAmount}`;
+      
+      let finalLabel = "";
+      if (servingUnit === 'serving') {
+          finalLabel = `${numServings} x ${scannedResult.weight_amount}`;
+      } else {
+          finalLabel = `${numServings} ${servingUnit}`;
+      }
 
-      // If updating an existing log, delete old one first
-      if (scannedResult.id && !scannedResult.id.toString().startsWith('usda') && !scannedResult.id.toString().startsWith('off')) {
+      if (scannedResult.id && !scannedResult.id.toString().startsWith('usda') && !scannedResult.id.toString().startsWith('off') && !scannedResult.id.toString().startsWith('ai_')) {
           actions.deleteFood(scannedResult.id); 
       }
       
       actions.saveFood({
          name: scannedResult.name || 'Unknown Food',
-         calories: totals.c, 
-         protein: totals.p, 
-         carbs: totals.ca, 
-         fats: totals.f,    
-         weight_amount: finalWeightLabel
+         calories: calculationData.c, 
+         protein: calculationData.p, 
+         carbs: calculationData.ca, 
+         fats: calculationData.f,    
+         weight_amount: finalLabel 
       }, getLocalDate(viewDate), addingToMeal || scannedResult.mealType);
       
       setScannedResult(null);
       setAddingToMeal(null);
   };
-
-  const handleFoodSelect = (foodItem) => {
-      setNumServings(1); 
-      setScannedResult(normalizeFoodData(foodItem));
-      setAddingToMeal(foodItem.targetMeal || addingToMeal); 
-  };
   
+  // --- RESTORE EDIT STATE ---
   const handleEditLog = (logItem) => {
-      setNumServings(1); 
-      setScannedResult({ ...normalizeFoodData(logItem), mealType: logItem.mealType });
+      let currentUnit = 'serving';
+      let currentAmount = 1;
+      let baseStats = { ...normalizeFoodData(logItem) }; 
+
+      const label = logItem.weight_amount || "";
+      const match = label.match(/^(\d+(\.\d+)?)\s*(.*)$/);
+      
+      if (match) {
+          currentAmount = parseFloat(match[1]);
+          const textPart = match[3].toLowerCase().trim();
+          
+          if (textPart === 'g' || textPart === 'grams') currentUnit = 'g';
+          else if (textPart === 'oz' || textPart === 'ounces') currentUnit = 'oz';
+          else if (textPart === 'floz' || textPart === 'fl oz') currentUnit = 'floz';
+          else if (textPart.startsWith('x ')) currentUnit = 'serving'; 
+      }
+
+      if (currentAmount > 0) {
+          baseStats.weight_amount = logItem.weight_amount;
+      }
+
+      setNumServings(currentAmount);
+      setServingUnit(currentUnit);
+      setScannedResult({ ...baseStats, mealType: logItem.mealType, id: logItem.id });
   };
 
-  // Recipe Editor Logic
-// Dashboard.jsx
-    const handleEditorSearch = async () => {
-        if(!editorSearchQuery) return;
-        
-        setIsEditorSearching(true); // Start loading animation
-        try {
-            const res = await searchUSDA(editorSearchQuery);
-            setEditorSearchResults(res);
-        } catch (error) {
-            console.error("USDA Search Error:", error);
-        } finally {
-            setIsEditorSearching(false); // Stop loading animation
-        }
-    };
+  // --- RECIPE EDITOR LOGIC ---
+  const handleEditorSearch = async () => {
+      if(!editorSearchQuery) return;
+      setIsEditorSearching(true); 
+      try {
+          const res = await searchUSDA(editorSearchQuery);
+          setEditorSearchResults(res);
+      } catch (error) {
+          console.error("USDA Search Error:", error);
+      } finally {
+          setIsEditorSearching(false); 
+      }
+  };
+
+  const handleAiIngredientFallback = async () => {
+      if(!editorSearchQuery) return;
+      setIsAiGeneratingIng(true);
+      const result = await searchAI(editorSearchQuery);
+      if (result) {
+          addIngredientToEditor(result);
+      }
+      setIsAiGeneratingIng(false);
+  };
 
   const addIngredientToEditor = (foodItem) => {
     if (!editingMeal) return;
     const cleanItem = normalizeFoodData(foodItem);
+    const newItem = { ...cleanItem, weight: cleanItem.weight_amount }; 
+    
+    let newIngredients = [...(editingMeal.ingredients || [])];
+    
+    if (swappingIngIndex !== null) {
+        newIngredients[swappingIngIndex] = newItem;
+    } else {
+        newIngredients.push(newItem);
+    }
+
+    const totals = newIngredients.reduce((acc, curr) => ({
+        c: acc.c + curr.calories, p: acc.p + curr.protein, ca: acc.ca + curr.carbs, f: acc.f + curr.fats
+    }), {c:0, p:0, ca:0, f:0});
+
     setEditingMeal({ 
         ...editingMeal, 
-        ingredients: [...(editingMeal.ingredients || []), { ...cleanItem, weight: cleanItem.weight_amount }],
-        calories: (editingMeal.calories||0) + cleanItem.calories,
-        protein: (editingMeal.protein||0) + cleanItem.protein,
-        carbs: (editingMeal.carbs||0) + cleanItem.carbs,
-        fats: (editingMeal.fats||0) + cleanItem.fats
+        ingredients: newIngredients,
+        calories: totals.c, protein: totals.p, carbs: totals.ca, fats: totals.f
     });
-    setIsFoodSearching(false); setEditorSearchQuery(''); setEditorSearchResults([]);
+    
+    setIsFoodSearching(false); 
+    setSwappingIngIndex(null); 
+    setEditorSearchQuery(''); 
+    setEditorSearchResults([]);
+  };
+
+  const updateIngredientInRecipe = (index, newValue, newUnit) => {
+      const newIngs = [...editingMeal.ingredients];
+      const ing = { ...newIngs[index] };
+      const oldLabel = ing.weight || "1 serving";
+      
+      const parts = oldLabel.match(/^(\d+(\.\d+)?)\s*(.*)$/);
+      const oldAmount = parts ? parseFloat(parts[1]) : 1;
+      const oldUnitStr = parts ? parts[3].toLowerCase().trim() : "serving";
+      
+      let oldUnit = 'serving';
+      if (oldUnitStr.startsWith('g')) oldUnit = 'g';
+      if (oldUnitStr.startsWith('oz')) oldUnit = 'oz';
+      if (oldUnitStr.startsWith('fl')) oldUnit = 'floz';
+
+      const baseWeight = getBaseGramWeight(oldLabel); 
+      
+      let adjustedAmount = parseFloat(newValue);
+
+      if (newUnit !== oldUnit && (oldUnit !== 'serving' && newUnit !== 'serving')) {
+           adjustedAmount = convertQuantity(oldAmount, oldUnit, newUnit, baseWeight);
+           ing.weight = `${adjustedAmount} ${newUnit}`;
+      }
+      else if (newUnit !== oldUnit && baseWeight) {
+          adjustedAmount = convertQuantity(oldAmount, oldUnit, newUnit, baseWeight);
+          ing.weight = `${adjustedAmount} ${newUnit}`;
+      } else {
+          const ratio = adjustedAmount / (oldAmount || 1);
+          if (!isNaN(ratio) && ratio !== Infinity && ratio !== 0) {
+              ing.calories = Math.round(ing.calories * ratio);
+              ing.protein = Math.round(ing.protein * ratio);
+              ing.carbs = Math.round(ing.carbs * ratio);
+              ing.fats = Math.round(ing.fats * ratio);
+          }
+          ing.weight = `${adjustedAmount} ${newUnit}`;
+      }
+      
+      newIngs[index] = ing;
+      
+      const totals = newIngs.reduce((acc, curr) => ({
+          c: acc.c + (curr.calories||0), p: acc.p + (curr.protein||0), ca: acc.ca + (curr.carbs||0), f: acc.f + (curr.fats||0)
+      }), {c:0, p:0, ca:0, f:0});
+
+      setEditingMeal({ ...editingMeal, ingredients: newIngs, calories: totals.c, protein: totals.p, carbs: totals.ca, fats: totals.f });
   };
 
   const handleSaveRecipeWrapper = () => { actions.saveRecipe(editingMeal); setEditingMeal(null); };
-// src/components/Dashboard.jsx
 
-/// --- HELPER: Fixes "Monday" vs "monday" vs "Mon" bugs ---
-  const normalizeId = (input) => {
-    if (!input) return null;
-    const lower = input.toLowerCase().trim();
-    
-    // 1. Direct match
-    if (["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].includes(lower)) {
-        return lower;
-    }
-    
-    // 2. Abbreviation mapping
-    const map = {
-        "mon": "monday", "tue": "tuesday", "tues": "tuesday", 
-        "wed": "wednesday", "weds": "wednesday", 
-        "thu": "thursday", "thur": "thursday", "thurs": "thursday",
-        "fri": "friday", "sat": "saturday", "sun": "sunday"
-    };
-    return map[lower] || lower; // Fallback to input if no match
-  };
-
-  // --- AI HANDLER ---
+  // --- AI HANDLER (UPDATED FOR ACTION-FIRST) ---
   const handleChatSubmit = async (e) => {
     e.preventDefault(); 
     if (!chatInput.trim() || isChatProcessing) return;
@@ -240,7 +416,6 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
     setIsChatProcessing(true);
     
     try {
-        // 1. PREPARE CONTEXT (Send simplified schedule to save tokens)
         const simpleSchedule = workouts.map(w => ({ 
             id: w.id, 
             day: w.day, 
@@ -248,47 +423,61 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
             exercises: w.exercises.map(ex => `${ex.name} (${ex.sets}x${ex.reps})`) 
         }));
 
-        // 2. THE PRODUCTION PROMPT
         const systemPrompt = `
-        You are Titan, an elite personal trainer.
-        
-        CURRENT SCHEDULE:
-        ${JSON.stringify(simpleSchedule)}
-        
-        USER PROFILE:
-        Goal: ${userProfile?.goal || 'general fitness'}
-        Injuries: ${userProfile?.injuries || 'none'}
-        
-        USER REQUEST: "${msg}"
-        
-        YOUR TASK:
-        Return a JSON object determining the action.
-        
-        ACTIONS (Choose One):
-        
-        1. UPDATE WORKOUTS:
-           Return: { "type": "update_plan", "updates": [ { "id": "monday", "day": "Monday", "focus": "...", "exercises": [...] } ] }
-           - "id" MUST be the full english day name in lowercase (e.g. "monday").
-           - "exercises": Array of { "name", "sets", "reps", "type" (weighted/bodyweight/cardio), "tips" }.
-           - TO CLEAR A DAY: Set "exercises": [] (Empty Array).
-           - TO MODIFY: Return the FULL list for that day (copy existing ones if keeping them).
-           
-        2. ADD MEAL:
-           Return: { "type": "add_meal", "data": { "name": "...", "calories": 0, "protein": 0, "ingredients": [], "instructions": "..." } }
-           - Estimate nutritional values for the meal.
-           
-        3. ADVICE/CHAT:
-           Return: { "type": "advice", "message": "..." }
-        
-        IMPORTANT rules:
-        - If the user mentions an injury (e.g., "bad knees"), REPLACE exercises that aggravate it (e.g., swap Squats for Swimming/Elliptical).
-        - JSON ONLY. No markdown.
-        `;
-        
-        // 3. CALL CLOUD FUNCTION
-        const data = await generateContent(systemPrompt);
+You are Titan, a database-management AI for fitness. 
+User Goal: ${userProfile?.goal || 'general fitness'}
+Injuries: ${userProfile?.injuries || 'none'}
+Current Schedule: ${JSON.stringify(simpleSchedule)}
 
-        // 4. PROCESS RESPONSE
+PRIME DIRECTIVE:
+You prefer ACTION over SPEECH. 
+1. If the user mentions a specific muscle group or workout day, generate a "update_plan" JSON immediately.
+2. If the user mentions hunger, specific foods, or diet goals, generate a "add_meal" JSON immediately.
+3. Only use "advice" JSON if the user asks a theoretical question (e.g., "Why is sleep important?").
+
+RESPONSE FORMAT (STRICT JSON ONLY):
+
+SCENARIO 1: User says "Give me a chest workout for Monday" or "My chest is lagging"
+{
+  "type": "update_plan",
+  "updates": [
+    { 
+      "day": "Monday", 
+      "focus": "Chest & Triceps Focus", 
+      "exercises": [
+        { "name": "Barbell Bench Press", "sets": "4", "reps": "6-8", "tips": "Heavy compund", "type": "weighted" },
+        { "name": "Incline Dumbbell Press", "sets": "3", "reps": "10-12", "tips": "Upper shelf", "type": "weighted" },
+        { "name": "Cable Flys", "sets": "3", "reps": "15", "tips": "Stretch at bottom", "type": "weighted" }
+      ]
+    }
+  ]
+}
+
+SCENARIO 2: User says "I want a high protein breakfast" or "Add chicken rice to lunch"
+{
+  "type": "add_meal",
+  "data": { 
+      "name": "Titan High-Protein Breakfast", 
+      "calories": 650, 
+      "protein": 55, 
+      "carbs": 45, 
+      "fats": 22, 
+      "ingredients": [
+          { "name": "Egg Whites", "weight": "200g", "calories": 100, "protein": 22, "carbs": 0, "fats": 0 },
+          { "name": "Whole Eggs", "weight": "2 large", "calories": 140, "protein": 12, "carbs": 1, "fats": 10 },
+          { "name": "Oats", "weight": "60g", "calories": 230, "protein": 8, "carbs": 40, "fats": 4 }
+      ],
+      "instructions": "1. Scramble eggs.\n2. Cook oats with water.\n3. Combine and season."
+  }
+}
+
+SCENARIO 3: User says "How do I lose weight?" (Only then use advice)
+{ "type": "advice", "message": "To lose weight, you must be in a caloric deficit..." }
+Request: "${msg}"
+`;
+        
+        const data = await generateContent(systemPrompt, 'chat'); 
+
         if (!data) throw new Error("No data returned");
         
         if (data.type === 'update_plan') {
@@ -296,25 +485,25 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
              let confirmationMsg = "Updated: ";
              
              for (const u of updates) {
-                // BUG FIX: Normalize ID (Handles "Mon", "Monday", "monday")
                 const targetId = normalizeId(u.id || u.day);
-                
                 if (targetId) {
                     await actions.updateWorkoutPlan(targetId, {
                         ...u,
-                        id: targetId, // Ensure DB gets clean ID
+                        id: targetId, 
                         day: u.day || targetId.charAt(0).toUpperCase() + targetId.slice(1),
                         exercises: Array.isArray(u.exercises) ? u.exercises : []
                     });
                     confirmationMsg += `${targetId.charAt(0).toUpperCase() + targetId.slice(1)}, `;
                 }
              }
-             setChatHistory(p => [...p, { role: 'ai', content: confirmationMsg.slice(0, -2) + "." }]);
+             setChatHistory(p => [...p, { role: 'ai', content: "I've updated your Workout Plan. Swapping tabs now..." }]);
+             setTimeout(() => setActiveTab('workouts'), 1500);
         }
         else if (data.type === 'add_meal') { 
              const cleanMeal = normalizeFoodData(data.data);
              await actions.saveRecipe(cleanMeal); 
-             setChatHistory(p => [...p, { role: 'ai', content: `👨‍🍳 Added "${cleanMeal.name}" to your diet plan.` }]);
+             setChatHistory(p => [...p, { role: 'ai', content: `👨‍🍳 Added "${cleanMeal.name}" to your diet plan. Taking you there...` }]);
+             setTimeout(() => setActiveTab('diet'), 1500);
         }
         else {
              setChatHistory(p => [...p, { role: 'ai', content: data.message || "Done." }]);
@@ -322,24 +511,16 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
 
     } catch (err) {
         console.error("Chat Error:", err);
-        // User-friendly error for Rate Limits
-        const errorMsg = err.message.includes('resource-exhausted') 
-            ? "Daily limit reached (30/30). Come back tomorrow!" 
-            : "I'm having trouble connecting. Try again.";
-            
-        setChatHistory(p => [...p, { role: 'ai', content: errorMsg }]);
+        setChatHistory(p => [...p, { role: 'ai', content: "Error connecting to AI." }]);
     }
     
     setIsChatProcessing(false);
   };
 
   // --- RENDER HELPERS ---
-// --- RENDER HELPERS ---
   const formattedDate = getLocalDate(viewDate);
   const activeWorkout = workouts.find(w => w.day === viewDate.toLocaleDateString('en-US', { weekday: 'long' })) || workouts[0];
 
-  // FIX: Robust Date Matching
-  // This checks if the log date MATCHES "YYYY-MM-DD" OR STARTS WITH it (handling "2026-01-01T15:00...")
   const activeFoodLogs = foodLog.filter(f => {
       if (!f.date) return false;
       return f.date === formattedDate || f.date.startsWith(formattedDate);
@@ -371,34 +552,20 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
     return categories;
   }, [selectedMealIds, allMeals]);
 
-  // --- CALCULATIONS ---
-  // If userProfile is null, we default to 2000, but the Onboarding check handles this mostly.
   const tdee = userProfile?.caloriesTarget || 2500;
-  
   const calsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.calories || 0), 0);
   const protConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.protein || 0), 0);
   const carbsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.carbs || 0), 0);
   const fatsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.fats || 0), 0);
-  const displayMacros = getDisplayMacros();
 
-  // --- LOADING STATES ---
   if (authLoading) return <div className="h-screen flex items-center justify-center bg-gray-900 text-white"><Loader className="animate-spin w-10 h-10 text-blue-500"/></div>;
-  
-  if (!user) {
-      // If auth is done but no user, redirect happens in App.jsx via PrivateRoute
-      return null;
-  }
-
-  // *** ONBOARDING CHECK ***
-  // If user exists but profile is null, show wizard
-  if (user && userProfile === null) {
-      return <Onboarding onComplete={actions.saveProfile} />;
-  }
+  if (!user) return null;
+  if (user && userProfile === null) return <Onboarding onComplete={actions.saveProfile} />;
 
   return (
     <div className="flex flex-col h-screen bg-slate-900 font-sans text-gray-100 overflow-hidden relative touch-pan-x selection:bg-blue-500/30">
       
-      {/* HEADER (Sticky Top + Safe Area) */}
+      {/* HEADER */}
       <header className="bg-black/80 backdrop-blur-md border-b border-white/10 p-4 pt-safe-top shrink-0 z-20">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           <div>
@@ -427,7 +594,7 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
         </div>
       </div>
 
-      {/* MAIN CONTENT (Scrollable) */}
+      {/* MAIN CONTENT */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-24 scroll-smooth">
         <div className="max-w-5xl mx-auto space-y-6">
           
@@ -486,14 +653,9 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
                </div>
                
                <div className="grid md:grid-cols-2 gap-4">
-                   {allMeals.length > 0 ? (allMeals.map((meal, i) => (
+                   {allMeals.map((meal, i) => (
                        <MealCard key={i} meal={meal} isSelected={selectedMealIds.includes(meal.id)} onToggle={() => setSelectedMealIds(p => p.includes(meal.id) ? p.filter(x=>x!==meal.id) : [...p, meal.id])} onChefMode={setChefMeal} onEdit={setEditingMeal} onDelete={actions.deleteRecipe} />
-                   ))) : (
-                       <div className="col-span-2 text-center py-12 border-2 border-dashed border-gray-700 rounded-xl bg-gray-800/30">
-                           <div className="text-gray-400 text-lg mb-2 font-bold">No meals found.</div>
-                           <div className="text-gray-500 text-sm">Create your first meal plan.</div>
-                       </div>
-                   )}
+                   ))}
                </div>
                
                <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mt-6 shadow-xl">
@@ -531,14 +693,14 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
             <div className="space-y-6 animate-in fade-in duration-300 pb-safe-bottom">
                <ConsistencyHeatmap workoutLogs={workoutLogs} foodLogs={foodLog} />
                <CalorieDashboard 
-                  consumed={calsConsumed} 
-                  goal={tdee} 
-                  protein={protConsumed} 
-                  proteinGoal={Math.round((weightLog[0]?.weight || 180))} 
-                  carbs={carbsConsumed} 
-                  carbsGoal={250} 
-                  fats={fatsConsumed} 
-                  fatsGoal={80} 
+                 consumed={calsConsumed} 
+                 goal={tdee} 
+                 protein={protConsumed} 
+                 proteinGoal={Math.round((weightLog[0]?.weight || 180))} 
+                 carbs={carbsConsumed} 
+                 carbsGoal={250} 
+                 fats={fatsConsumed} 
+                 fatsGoal={80} 
                />
                
                <div className="space-y-4">
@@ -558,11 +720,11 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
                                <div className="divide-y divide-gray-700/50">
                                    {meals.map(f => (
                                        <div key={f.id} className="p-3 flex justify-between items-center hover:bg-gray-700/30 active:bg-gray-700/50 transition">
-                                           <div className="flex-1 pr-4">
+                                           <div className="flex-1 pr-4 min-w-0">
                                                <div className="text-sm text-gray-300 font-medium truncate">{f.name}</div>
-                                               <div className="text-[10px] text-gray-500 mt-0.5">{f.calories} Cal • {f.protein}g P • {f.weight_amount}</div>
+                                               <div className="text-[10px] text-gray-500 mt-0.5 truncate">{f.calories} Cal • {f.protein}g P • {f.weight_amount}</div>
                                            </div>
-                                           <div className="flex items-center gap-1">
+                                           <div className="flex items-center gap-1 shrink-0">
                                                <button onClick={() => handleEditLog(f)} className="text-gray-500 hover:text-blue-400 p-3 active:scale-90"><Edit2 className="w-4 h-4"/></button>
                                                <button onClick={() => actions.deleteFood(f.id)} className="text-gray-500 hover:text-red-500 p-3 active:scale-90"><Trash2 className="w-4 h-4"/></button>
                                            </div>
@@ -589,7 +751,13 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
                             </div>
                         </div>
                     ))}
-                    {isChatProcessing && <div className="flex justify-start"><div className="bg-gray-700 p-3 rounded-2xl rounded-bl-none"><Loader className="w-4 h-4 animate-spin text-gray-400"/></div></div>}
+                    {isChatProcessing && (
+                        <div className="flex justify-start">
+                            <div className="bg-gray-700 p-3 rounded-2xl rounded-bl-none">
+                                <Loader className="w-4 h-4 animate-spin text-gray-400"/>
+                            </div>
+                        </div>
+                    )}
                     <div ref={chatEndRef}/>
                 </div>
                 <form onSubmit={handleChatSubmit} className="p-3 bg-gray-900 border-t border-gray-700 flex gap-2 pb-safe-bottom">
@@ -633,54 +801,76 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
             mealType={addingToMeal} 
             savedMeals={allMeals} 
             onClose={() => setAddingToMeal(null)} 
-            onAddFood={handleFoodAddFromModal} 
-            onScanFood={(food) => handleFoodSelect({ ...food, targetMeal: addingToMeal })} 
+            onAddFood={handleFoodSelect} 
+            onScanFood={handleFoodSelect} 
           />
       )}
 
-      {/* LOG CONFIRMATION MODAL (Bottom Sheet) */}
+      {/* --- LOG CONFIRMATION MODAL (SMART UNITS) --- */}
       {scannedResult && (
         <div className="fixed inset-0 z-[80] bg-black/95 backdrop-blur-md flex items-end sm:items-center justify-center sm:p-4 animate-in slide-in-from-bottom-10">
            <div className="bg-slate-800 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-700 max-h-[90vh]">
               <div className="p-5 border-b border-slate-700 bg-slate-900 flex justify-between items-center">
                   <h3 className="text-xl font-bold text-white truncate max-w-[70%]">{scannedResult.name}</h3>
-                  <button onClick={() => { setScannedResult(null); setAddingToMeal(null); }} className="text-gray-400 p-2 bg-gray-800 rounded-full"><X size={20}/></button>
+                  <button onClick={() => { setScannedResult(null); setAddingToMeal(null); }} className="text-gray-400 p-2 bg-gray-800 rounded-full hover:bg-gray-700 active:scale-90 transition"><X size={20}/></button>
               </div>
               
               <div className="p-6 space-y-6 overflow-y-auto">
+                  {/* Amount & Unit Selector */}
                   <div className="flex items-center justify-between bg-slate-900 p-4 rounded-2xl border border-slate-700 shadow-inner">
                       <div className="flex flex-col">
-                          <span className="text-gray-400 font-bold uppercase text-xs tracking-wider">Servings</span>
-                          <span className="text-xs text-gray-500 mt-1">(1 serv = {scannedResult.weight_amount || '100g'})</span>
+                          <span className="text-gray-400 font-bold uppercase text-xs tracking-wider">Amount</span>
+                          <span className="text-xs text-gray-500 mt-1">
+                              {calculationData.baseWeight ? `(${calculationData.baseWeight}g per base)` : '(Standard Serving)'}
+                          </span>
                       </div>
-                      <div className="flex items-center gap-3">
+                      
+                      <div className="flex items-center gap-2">
                           <input 
                               type="number" 
                               inputMode="decimal" 
                               value={numServings} 
                               onChange={e => { const val = parseFloat(e.target.value); setNumServings(isNaN(val) ? '' : val); }} 
-                              className="bg-transparent text-white text-4xl font-black w-24 text-right outline-none placeholder-gray-700" 
+                              className="bg-transparent text-white text-3xl font-black w-24 text-right outline-none placeholder-gray-700 border-b border-gray-700 focus:border-blue-500 transition-colors" 
                               autoFocus
                           />
-                          <span className="text-emerald-500 font-black text-xl">x</span>
+                          
+                          {/* Unit Dropdown */}
+                          <div className="relative">
+                              <select 
+                                  value={servingUnit} 
+                                  onChange={(e) => handleUnitChange(e.target.value)}
+                                  className="appearance-none bg-gray-800 text-emerald-400 font-bold text-sm px-3 py-2 rounded-lg border border-gray-700 outline-none focus:border-emerald-500 pr-8"
+                              >
+                                  {/* Logic: Only show serving if specific base weight logic requires it, otherwise prioritize standard units */}
+                                  <option value="serving">Serving</option>
+                                  <option value="g">Grams</option>
+                                  <option value="oz">Oz</option>
+                                  <option value="floz">Fl Oz</option>
+                              </select>
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                                  <ChevronDown size={12} />
+                              </div>
+                          </div>
                       </div>
                   </div>
 
+                  {/* Macros Grid */}
                   <div className="grid grid-cols-4 gap-3">
                       <div className="bg-slate-900 p-3 rounded-2xl border border-slate-700 text-center">
-                          <div className="text-2xl font-black text-white">{displayMacros.c}</div>
+                          <div className="text-2xl font-black text-white">{calculationData.c}</div>
                           <div className="text-[10px] uppercase font-bold text-gray-500">Cals</div>
                       </div>
                       <div className="bg-slate-900 p-3 rounded-2xl border border-blue-900/30 text-center">
-                          <div className="text-xl font-bold text-blue-400">{displayMacros.p}</div>
+                          <div className="text-xl font-bold text-blue-400">{calculationData.p}</div>
                           <div className="text-[10px] uppercase font-bold text-gray-500">Prot</div>
                       </div>
                       <div className="bg-slate-900 p-3 rounded-2xl border border-orange-900/30 text-center">
-                          <div className="text-xl font-bold text-orange-400">{displayMacros.ca}</div>
+                          <div className="text-xl font-bold text-orange-400">{calculationData.ca}</div>
                           <div className="text-[10px] uppercase font-bold text-gray-500">Carb</div>
                       </div>
                       <div className="bg-slate-900 p-3 rounded-2xl border border-yellow-900/30 text-center">
-                          <div className="text-xl font-bold text-yellow-400">{displayMacros.f}</div>
+                          <div className="text-xl font-bold text-yellow-400">{calculationData.f}</div>
                           <div className="text-[10px] uppercase font-bold text-gray-500">Fat</div>
                       </div>
                   </div>
@@ -688,66 +878,158 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
 
               <div className="p-4 bg-slate-900 border-t border-slate-700 pb-safe-bottom">
                   <button onClick={handleScanConfirm} className="w-full bg-emerald-600 active:bg-emerald-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex justify-center items-center gap-2 transition active:scale-95">
-                      <Check size={24} /> {scannedResult.id && !scannedResult.id.toString().startsWith('usda') ? 'Update Log' : 'Log Food'}
+                      <Check size={24} /> {scannedResult.id && !scannedResult.id.toString().startsWith('usda') && !scannedResult.id.toString().startsWith('off') && !scannedResult.id.toString().startsWith('ai_') ? 'Update Log' : 'Log Food'}
                   </button>
               </div>
            </div>
         </div>
       )}
 
-      {/* RECIPE EDITOR MODAL */}
+      {/* --- RECIPE EDITOR MODAL (IMPROVED UI & FUNCTIONALITY) --- */}
       {editingMeal && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-end sm:items-center justify-center sm:p-4">
-            <div className="bg-slate-800 w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] sm:rounded-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 rounded-t-3xl">
+            <div className="bg-slate-800 w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] sm:rounded-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 rounded-t-3xl border border-slate-700">
+                
+                {/* Modal Header */}
                 <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
-                    <h2 className="font-bold text-white text-lg">Edit Meal</h2>
-                    <button onClick={() => setEditingMeal(null)} className="text-gray-400 font-medium p-2">Cancel</button>
+                    <div>
+                        <h2 className="font-bold text-white text-lg">Edit Meal</h2>
+                        <div className="flex gap-2 text-xs font-mono mt-1">
+                            <span className="text-emerald-400">{editingMeal.calories} Cals</span>
+                            <span className="text-gray-500">|</span>
+                            <span className="text-blue-400">{editingMeal.protein}P</span>
+                            <span className="text-orange-400">{editingMeal.carbs}C</span>
+                            <span className="text-yellow-400">{editingMeal.fats}F</span>
+                        </div>
+                    </div>
+                    <button onClick={() => setEditingMeal(null)} className="text-gray-400 font-medium p-2 bg-slate-800 rounded-lg hover:text-white transition">Cancel</button>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    <input 
-                        value={editingMeal.name} 
-                        onChange={e=>setEditingMeal({...editingMeal, name: e.target.value})} 
-                        className="w-full bg-slate-700 p-4 rounded-xl text-white text-lg font-bold placeholder-gray-500 outline-none border border-transparent focus:border-emerald-500 transition" 
-                        placeholder="Meal Name (e.g. Keto Burger)"
-                    />
+                <div className="flex-1 overflow-y-auto p-4 space-y-5">
+                    {/* Name Input */}
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Meal Name</label>
+                        <input 
+                            value={editingMeal.name} 
+                            onChange={e=>setEditingMeal({...editingMeal, name: e.target.value})} 
+                            className="w-full bg-slate-700 p-4 rounded-xl text-white text-lg font-bold placeholder-gray-500 outline-none border border-transparent focus:border-emerald-500 transition shadow-inner" 
+                            placeholder="e.g. Keto Burger"
+                        />
+                    </div>
                     
-                    <div className="flex justify-between items-center mt-6">
-                        <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">Ingredients</span>
-                        <button onClick={() => setIsFoodSearching(true)} className="text-xs font-bold text-emerald-500 flex items-center gap-1 bg-emerald-500/10 px-3 py-1.5 rounded-lg active:scale-95">
-                            + Add Item
-                        </button>
-                    </div>
+                    {/* Ingredients Section */}
+                    <div>
+                        <div className="flex justify-between items-center mb-3">
+                            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Ingredients ({editingMeal.ingredients?.length || 0})</span>
+                            <button onClick={() => setIsFoodSearching(true)} className="text-xs font-bold text-emerald-500 flex items-center gap-1 bg-emerald-500/10 px-3 py-2 rounded-lg active:scale-95 border border-emerald-500/20 hover:bg-emerald-500/20 transition">
+                                <Plus size={14}/> Add Item
+                            </button>
+                        </div>
 
-                    <div className="space-y-2">
-                        {editingMeal.ingredients?.map((ing, i) => (
-                            <div key={i} className="flex justify-between items-center p-3 bg-slate-700/50 rounded-xl border border-white/5">
-                                <div>
-                                    <div className="text-white text-sm font-medium">{ing.name}</div>
-                                    <div className="text-xs text-gray-400 mt-0.5">{ing.weight} • <span className="text-emerald-400">{ing.calories} Cal</span></div>
+                        <div className="space-y-3">
+                            {editingMeal.ingredients?.map((ing, i) => {
+                                const parts = (ing.weight || "1 serving").match(/^(\d+(\.\d+)?)\s*(.*)$/);
+                                const val = parts ? parts[1] : 1;
+                                const unitStr = parts ? parts[3].toLowerCase().trim() : "serving";
+                                
+                                let unit = 'serving';
+                                if (unitStr.startsWith('g')) unit = 'g';
+                                else if (unitStr.startsWith('oz')) unit = 'oz';
+                                else if (unitStr.startsWith('fl')) unit = 'floz';
+                                
+                                return (
+                                    <div key={i} className="flex flex-col gap-3 p-4 bg-slate-700/30 rounded-xl border border-white/5 shadow-sm">
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex-1">
+                                                <div className="text-white text-sm font-bold flex items-center gap-2">
+                                                    {ing.name}
+                                                    <button onClick={() => { setSwappingIngIndex(i); setIsFoodSearching(true); }} className="text-blue-400 hover:text-blue-300 p-1.5 rounded-full hover:bg-blue-400/10 transition" title="Swap Ingredient">
+                                                        <RefreshCw size={12}/>
+                                                    </button>
+                                                </div>
+                                                <div className="text-[10px] text-gray-400 mt-1 flex gap-2">
+                                                    <span className="text-emerald-400 font-mono">{ing.calories} Cal</span>
+                                                    <span>{ing.protein}p {ing.carbs}c {ing.fats}f</span>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* DELETE BUTTON */}
+                                            <button 
+                                                onClick={() => { 
+                                                    const newIng = [...editingMeal.ingredients]; 
+                                                    newIng.splice(i, 1); 
+                                                    const totals = newIng.reduce((acc, curr) => ({
+                                                        c: acc.c + (curr.calories || 0), 
+                                                        p: acc.p + (curr.protein || 0), 
+                                                        ca: acc.ca + (curr.carbs || 0), 
+                                                        f: acc.f + (curr.fats || 0)
+                                                    }), {c:0, p:0, ca:0, f:0});
+
+                                                    setEditingMeal({
+                                                        ...editingMeal, 
+                                                        ingredients: newIng,
+                                                        calories: totals.c,
+                                                        protein: totals.p,
+                                                        carbs: totals.ca,
+                                                        fats: totals.f
+                                                    }); 
+                                                }} 
+                                                className="text-red-400 p-2 bg-red-500/10 rounded-lg hover:bg-red-500/20 active:scale-95 transition"
+                                            >
+                                                <X size={16}/>
+                                            </button>
+                                        </div>
+                                        
+                                        {/* Smart Ingredient Controls */}
+                                        <div className="flex items-center gap-2 bg-slate-900/50 p-2 rounded-lg border border-white/5">
+                                            <div className="text-xs text-gray-500 font-bold uppercase mr-1">Qty:</div>
+                                            <input 
+                                                type="number" 
+                                                value={val} 
+                                                onChange={e => updateIngredientInRecipe(i, e.target.value, unit)} 
+                                                className="w-16 bg-transparent text-white text-center font-bold text-sm outline-none border-b border-gray-600 focus:border-emerald-500 transition-colors"
+                                            />
+                                            <div className="h-4 w-px bg-gray-700 mx-1"></div>
+                                            <select 
+                                                value={unit} 
+                                                onChange={e => updateIngredientInRecipe(i, val, e.target.value)}
+                                                className="bg-transparent text-xs text-gray-300 font-bold outline-none uppercase flex-1"
+                                            >
+                                                {/* <option value="serving">Serving</option> */}
+                                                <option value="g">Grams</option>
+                                                <option value="oz">Ounces</option>
+                                                <option value="floz">Fl Oz</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            
+                            {(!editingMeal.ingredients || editingMeal.ingredients.length === 0) && (
+                                <div className="text-center py-10 text-gray-500 text-sm border-2 border-dashed border-gray-700 rounded-xl bg-gray-800/50">
+                                    <div className="mb-2">🥗</div>
+                                    No ingredients yet.<br/>Tap "+ Add Item" to start building.
                                 </div>
-                                <button onClick={() => { const newIng = [...editingMeal.ingredients]; newIng.splice(i, 1); setEditingMeal({...editingMeal, ingredients: newIng}); }} className="text-red-400 p-2 bg-red-500/10 rounded-lg">
-                                    <X size={16}/>
-                                </button>
-                            </div>
-                        ))}
-                        {(!editingMeal.ingredients || editingMeal.ingredients.length === 0) && (
-                            <div className="text-center py-8 text-gray-600 italic text-sm border-2 border-dashed border-gray-700 rounded-xl">No ingredients yet.</div>
-                        )}
+                            )}
+                        </div>
                     </div>
 
-                    <label className="block text-sm font-bold text-gray-400 uppercase tracking-wider mt-6 mb-2">Instructions</label>
-                    <textarea 
-                        value={editingMeal.instructions} 
-                        onChange={e=>setEditingMeal({...editingMeal, instructions: e.target.value})} 
-                        className="w-full bg-slate-700 p-4 rounded-xl text-white h-32 outline-none border border-transparent focus:border-emerald-500 transition resize-none" 
-                        placeholder="Step 1: Cook the meat..."
-                    />
+                    {/* Instructions */}
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 mt-4">Instructions</label>
+                        <textarea 
+                            value={editingMeal.instructions} 
+                            onChange={e=>setEditingMeal({...editingMeal, instructions: e.target.value})} 
+                            className="w-full bg-slate-700 p-4 rounded-xl text-white h-32 outline-none border border-transparent focus:border-emerald-500 transition resize-none shadow-inner text-sm leading-relaxed" 
+                            placeholder="Step 1: Prep your ingredients..."
+                        />
+                    </div>
                 </div>
                 
+                {/* Save Button */}
                 <div className="p-4 bg-slate-900 border-t border-slate-700 pb-safe-bottom">
-                    <button onClick={handleSaveRecipeWrapper} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition">
-                        Save Recipe
+                    <button onClick={handleSaveRecipeWrapper} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition hover:bg-emerald-500 flex justify-center items-center gap-2">
+                        <Check size={20}/> Save Recipe
                     </button>
                 </div>
             </div>
@@ -769,21 +1051,50 @@ const [isEditorSearching, setIsEditorSearching] = useState(false);
                       onChange={e=>setEditorSearchQuery(e.target.value)} 
                       onKeyDown={e=>e.key==='Enter'&&handleEditorSearch()}
                   />
-                  <button onClick={handleEditorSearch} className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-sm">Go</button>
+                  <button onClick={handleEditorSearch} disabled={isEditorSearching} className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-sm min-w-[60px] flex items-center justify-center">
+                    {isEditorSearching ? <Loader className="w-4 h-4 animate-spin"/> : 'Go'}
+                  </button>
                   <button onClick={() => setIsFoodSearching(false)} className="text-gray-400 p-2"><X size={24}/></button>
               </div>
               
               <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {editorSearchResults.length > 0 ? (editorSearchResults.map(food => (
-                      <button key={food.id} onClick={() => addIngredientToEditor(food)} className="w-full text-left p-4 bg-slate-700/30 hover:bg-slate-700 rounded-xl flex justify-between items-center active:scale-95 transition border border-white/5">
-                          <div>
-                              <div className="font-bold text-white text-sm">{food.name}</div>
-                              <div className="text-xs text-gray-400 mt-1">{food.weight_amount}</div>
-                          </div>
-                          <div className="text-right text-emerald-500 font-bold text-sm bg-emerald-500/10 px-2 py-1 rounded-lg">{food.calories} Cal</div>
-                      </button>
-                  ))) : (
-                      <div className="text-center text-gray-500 mt-10">Type a food name to search.</div>
+                  {isEditorSearching ? (
+                      <div className="flex flex-col items-center justify-center h-48 space-y-3">
+                        <Loader className="w-8 h-8 animate-spin text-emerald-500" />
+                        <span className="text-gray-500 text-sm">Searching USDA...</span>
+                      </div>
+                  ) : (
+                      <>
+                        {editorSearchResults.length > 0 ? (
+                            editorSearchResults.map(food => (
+                              <button key={food.id} onClick={() => addIngredientToEditor(food)} className="w-full text-left p-4 bg-slate-700/30 hover:bg-slate-700 rounded-xl flex justify-between items-center active:scale-95 transition border border-white/5">
+                                  <div>
+                                      <div className="font-bold text-white text-sm">{food.name}</div>
+                                      <div className="text-xs text-gray-400 mt-1">{food.weight_amount}</div>
+                                  </div>
+                                  <div className="text-right text-emerald-500 font-bold text-sm bg-emerald-500/10 px-2 py-1 rounded-lg">{food.calories} Cal</div>
+                              </button>
+                            ))
+                        ) : (
+                            <div className="text-center text-gray-500 mt-10">
+                                {editorSearchQuery ? "No results found." : "Type a food name to search."}
+                            </div>
+                        )}
+
+                        {/* AI FALLBACK BUTTON */}
+                        {editorSearchQuery && !isEditorSearching && (
+                            <div className="mt-4 pt-4 border-t border-slate-700 text-center px-4">
+                                <button 
+                                    onClick={handleAiIngredientFallback}
+                                    disabled={isAiGeneratingIng}
+                                    className="w-full py-3 bg-indigo-600/20 text-indigo-400 rounded-xl font-bold flex items-center justify-center gap-2 border border-indigo-500/50 hover:bg-indigo-600/30 transition shadow-lg shadow-indigo-900/20"
+                                >
+                                    {isAiGeneratingIng ? <Loader className="w-4 h-4 animate-spin"/> : <><Wand2 size={16}/> Generate AI Estimate</>}
+                                </button>
+                                <p className="text-[10px] text-gray-500 mt-2">Use AI if you can't find the exact ingredient.</p>
+                            </div>
+                        )}
+                      </>
                   )}
               </div>
            </div>

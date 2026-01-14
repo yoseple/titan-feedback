@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserProfile, updateUserProfile, submitSupportTicket } from '../services/userService';
 import { calculateTDEE, calculateTargetCalories } from '../utils/nutrition';
-import { MessageSquare, Send, Loader, X, LogOut } from 'lucide-react';
+import { MessageSquare, Send, Loader, X, LogOut, Github } from 'lucide-react'; // Added Github icon
 
 export default function Settings({ onClose }) {
   const { currentUser, logout } = useAuth();
@@ -76,10 +76,18 @@ export default function Settings({ onClose }) {
     
     setSendingTicket(true);
     try {
-      await submitSupportTicket(ticket);
-      alert("Ticket Sent! We'll be in touch.");
-      setTicket({ ...ticket, subject: '', message: '' }); // Reset form
+      const response = await submitSupportTicket(ticket);
+      
+      // Check if we got a GitHub URL back
+      if (response && response.url) {
+        alert("Ticket Created Successfully! (Added to GitHub)");
+      } else {
+        alert("Ticket Received!");
+      }
+      
+      setTicket({ ...ticket, subject: '', message: '' }); 
     } catch (err) {
+      console.error(err);
       alert("Failed to send ticket. Please try again.");
     } finally {
       setSendingTicket(false);

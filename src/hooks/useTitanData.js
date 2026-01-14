@@ -1,150 +1,84 @@
 import { useState, useEffect } from 'react';
-import { onAuthStateChanged } from "firebase/auth";
 import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  deleteDoc, 
-  doc, 
-  serverTimestamp, 
-  setDoc, 
-  getDocs, 
-  getDoc,
-  where // <--- Added 'where' for filtering
-} from "firebase/firestore";
-import { auth, db, appId } from '../lib/firebase';
-import { DEFAULT_WORKOUTS, INITIAL_MEALS } from '../data/defaults';
+  collection, query, onSnapshot, doc, 
+  addDoc, deleteDoc, updateDoc, setDoc, orderBy, limit, serverTimestamp 
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
 
 export const useTitanData = () => {
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const { currentUser: user, loading: authLoading } = useAuth();
   
-  // Data States
   const [workouts, setWorkouts] = useState([]);
   const [workoutLogs, setWorkoutLogs] = useState([]);
   const [weightLog, setWeightLog] = useState([]);
   const [foodLog, setFoodLog] = useState([]);
   const [customMeals, setCustomMeals] = useState([]);
-  const [userProfile, setUserProfile] = useState(null);
+  const [userProfile, setUserProfile] = useState(undefined); 
+  const [foodHistory, setFoodHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // 1. AUTH LISTENER
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-       setUser(currentUser);
-       setAuthLoading(false);
-    });
-    return unsubscribe;
-  }, []);
+  // FIX: Must match your deployed database folder exactly
+  const appId = "titan-73b02"; 
 
-  // 2. DATA SYNC (OPTIMIZED)
   useEffect(() => {
+    if (authLoading) return;
     if (!user) {
-        setWorkouts([]); setWorkoutLogs([]); setWeightLog([]); 
-        setFoodLog([]); setCustomMeals([]); setUserProfile(null);
-        return;
+      setLoading(false);
+      setUserProfile(null);
+      return;
     }
+
+    // Refs - Pointing to "titan-73b02"
+    const userRef = doc(db, 'artifacts', appId, 'users', user.uid);
+    const workoutsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'workouts');
+    const logsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'workout_logs');
+    const weightRef = collection(db, 'artifacts', appId, 'users', user.uid, 'weight_logs');
+    const foodRef = collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs');
+    const mealsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'custom_meals');
+    const historyRef = collection(db, 'artifacts', appId, 'users', user.uid, 'food_history');
+
+    const unsubProfile = onSnapshot(userRef, (doc) => setUserProfile(doc.exists() ? doc.data() : null));
+    const unsubWorkouts = onSnapshot(query(workoutsRef, orderBy('order')), (snap) => setWorkouts(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubLogs = onSnapshot(query(logsRef, orderBy('timestamp', 'desc'), limit(100)), (snap) => setWorkoutLogs(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubWeight = onSnapshot(query(weightRef, orderBy('date', 'desc'), limit(30)), (snap) => setWeightLog(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubFood = onSnapshot(query(foodRef, orderBy('timestamp', 'desc'), limit(200)), (snap) => setFoodLog(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubMeals = onSnapshot(mealsRef, (snap) => setCustomMeals(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubHistory = onSnapshot(query(historyRef, orderBy('lastUsed', 'desc'), limit(20)), (snap) => {
+        setFoodHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+    });
+
+    return () => {
+      unsubProfile(); unsubWorkouts(); unsubLogs(); unsubWeight(); unsubFood(); unsubMeals(); unsubHistory();
+    };
+  }, [user, authLoading]);
+
+  const actions = {
+    saveProfile: async (data) => { if(user) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), data, { merge: true }); },
+    updateWorkoutPlan: async (dayId, data) => { if(user) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workouts', dayId), { ...data, order: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].indexOf(data.day) }); },
+    saveWorkoutLog: async (log, dateStr) => { if(user) await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'workout_logs'), { ...log, date: dateStr, timestamp: serverTimestamp() }); },
+    deleteWorkoutLog: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workout_logs', id)); },
+    saveWeight: async (weight, dateStr) => { if(user) await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'weight_logs'), { weight: parseFloat(weight), date: dateStr }); },
     
-    // A. FETCH PROFILE (Unified Path: users/{uid})
-    const fetchProfile = async () => {
-        const directRef = doc(db, "users", user.uid);
-        const directSnap = await getDoc(directRef);
-        
-        if (directSnap.exists()) {
-             setUserProfile(directSnap.data());
-        } else {
-             setUserProfile(null); // Triggers Onboarding
-        }
-    };
-    fetchProfile();
-
-    // B. FETCH WORKOUT PLAN
-    const fetchWorkouts = async () => {
-      // We keep workout plans in 'artifacts' for now as they are complex nested objects
-      const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'workout_plan');
-      const snapshot = await getDocs(colRef);
-      
-      if (snapshot.empty) {
-        // Initialize Defaults
-        Promise.all(DEFAULT_WORKOUTS.map(d => setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workout_plan', d.id), d)));
-        setWorkouts(DEFAULT_WORKOUTS);
-      } else {
-        const loaded = snapshot.docs.map(d => d.data());
-        const order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-        loaded.sort((a, b) => order.indexOf(a.day) - order.indexOf(b.day));
-        setWorkouts(loaded);
-      }
-    };
-    fetchWorkouts();
-
-    // C. REAL-TIME LISTENERS (Performance Optimized)
-    // Only fetch data from the last 30 days to prevent app slowdowns
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const dateCutoff = thirtyDaysAgo.toISOString().split('T')[0]; // "YYYY-MM-DD"
-
-    // Weight Logs (Keep all for charts, or limit if too heavy)
-    const u1 = onSnapshot(query(
-        collection(db, 'artifacts', appId, 'users', user.uid, 'weight_logs'), 
-        orderBy('date', 'desc')
-    ), s => setWeightLog(s.docs.map(d => ({id: d.id, ...d.data()}))));
-
-    // Food Logs (Limit to last 30 days)
-    const u2 = onSnapshot(query(
-        collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), 
-        where('date', '>=', dateCutoff), // <--- OPTIMIZATION
-        orderBy('date', 'desc')
-    ), s => setFoodLog(s.docs.map(d => ({id: d.id, ...d.data()}))));
-
-    // Workout Logs (Limit to last 30 days)
-    const u3 = onSnapshot(query(
-        collection(db, 'artifacts', appId, 'users', user.uid, 'workout_logs'), 
-        where('date', '>=', dateCutoff), // <--- OPTIMIZATION
-        orderBy('date', 'desc')
-    ), s => setWorkoutLogs(s.docs.map(d => ({id: d.id, ...d.data()}))));
-
-    // Custom Recipes (Fetch All)
-    const u4 = onSnapshot(query(
-        collection(db, 'artifacts', appId, 'users', user.uid, 'custom_recipes'), 
-        orderBy('createdAt', 'desc')
-    ), s => setCustomMeals(s.docs.map(d => ({id: d.id, ...d.data()}))));
-
-    return () => { u1(); u2(); u3(); u4(); };
-  }, [user]);
-
-  // ACTIONS (Standardized)
-  const saveFood = async (foodData, date, mealType) => { 
-      if (!user) return; 
-      // Ensure date is just the string YYYY-MM-DD
-      const dateString = date.includes('T') ? date.split('T')[0] : date;
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), { ...foodData, mealType, date: dateString, createdAt: serverTimestamp() }); 
-  };
-  
-  const deleteFood = async (id) => { if (!user) return; await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id)); };
-  
-  const saveWorkoutLog = async (logData, date) => { 
-      if (!user) return; 
-      const dateString = date.includes('T') ? date.split('T')[0] : date;
-      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'workout_logs'), { ...logData, date: dateString, createdAt: serverTimestamp() }); 
-  };
-  
-  const deleteWorkoutLog = async (id) => { if (!user) return; await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workout_logs', id)); };
-  
-  const saveRecipe = async (meal) => { if(!user) return; const m = {...meal, updatedAt: serverTimestamp()}; delete m.id; const isDef = INITIAL_MEALS.some(x=>x.id===meal.id); if(meal.id&&!isDef) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_recipes', meal.id), m, {merge:true}); else await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'custom_recipes'), {...m, createdAt: serverTimestamp()}); };
-  const deleteRecipe = async (id) => { if (!user) return; await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_recipes', id)); };
-  const updateWorkoutPlan = async (id, data) => { if (!user) return; await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workout_plan', id), data); setWorkouts(p => p.map(w => w.id === id ? data : w)); };
-  
-  // OPTIMIZED SAVE PROFILE
-  const saveProfile = async (newProfile) => {
-      if(!user) return;
-      // Single source of truth: users/{uid}
-      await setDoc(doc(db, "users", user.uid), newProfile, { merge: true });
-      setUserProfile(newProfile);
+    saveFood: async (foodData, dateStr, mealType) => {
+        if(!user) return;
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), { ...foodData, date: dateStr, mealType, timestamp: serverTimestamp() });
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_history'), { ...foodData, lastUsed: serverTimestamp() });
+    },
+    deleteFood: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id)); },
+    
+    saveRecipe: async (mealData) => {
+        if(!user) return;
+        if (mealData.id) { const { id, ...rest } = mealData; await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id), rest); } 
+        else { await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'custom_meals'), mealData); }
+    },
+    deleteRecipe: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id)); },
+    
+    deleteHistoryItem: async (id) => { 
+        if (user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_history', id)); 
+    }
   };
 
-  return {
-    user, authLoading, workouts, workoutLogs, weightLog, foodLog, customMeals, userProfile,
-    actions: { saveFood, deleteFood, saveWorkoutLog, deleteWorkoutLog, saveRecipe, deleteRecipe, updateWorkoutPlan, saveProfile }
-  };
+  return { user, authLoading, loading, workouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, foodHistory, actions };
 };
