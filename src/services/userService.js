@@ -12,8 +12,8 @@ import {
   getDocs 
 } from "firebase/firestore";
 
-// FIX: Align with useTitanData and your DB Rules
-const APP_ID = "titan-73b02";
+// FIX: Matches the appId in useTitanData.js
+const APP_ID = "titan-73b02"; 
 
 // --- PROFILE & SETTINGS ---
 

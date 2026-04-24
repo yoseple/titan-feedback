@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   collection, query, onSnapshot, doc, 
   addDoc, deleteDoc, updateDoc, setDoc, orderBy, limit, serverTimestamp 
-} from 'firebase/firestore';
+} from 'firebase/firestore'; // <--- Added 'limit' here
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -15,10 +15,10 @@ export const useTitanData = () => {
   const [foodLog, setFoodLog] = useState([]);
   const [customMeals, setCustomMeals] = useState([]);
   const [userProfile, setUserProfile] = useState(undefined); 
-  const [foodHistory, setFoodHistory] = useState([]);
+  const [foodHistory, setFoodHistory] = useState([]); 
   const [loading, setLoading] = useState(true);
 
-  // FIX: Must match your deployed database folder exactly
+  // FIX: Matches your screenshot (artifacts > titan-73b02)
   const appId = "titan-73b02"; 
 
   useEffect(() => {
@@ -29,7 +29,7 @@ export const useTitanData = () => {
       return;
     }
 
-    // Refs - Pointing to "titan-73b02"
+    // Refs - Pointing to artifacts/titan-73b02/users/{uid}
     const userRef = doc(db, 'artifacts', appId, 'users', user.uid);
     const workoutsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'workouts');
     const logsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'workout_logs');
@@ -44,6 +44,8 @@ export const useTitanData = () => {
     const unsubWeight = onSnapshot(query(weightRef, orderBy('date', 'desc'), limit(30)), (snap) => setWeightLog(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubFood = onSnapshot(query(foodRef, orderBy('timestamp', 'desc'), limit(200)), (snap) => setFoodLog(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubMeals = onSnapshot(mealsRef, (snap) => setCustomMeals(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    
+    // This is the line that was crashing before (limit was undefined)
     const unsubHistory = onSnapshot(query(historyRef, orderBy('lastUsed', 'desc'), limit(20)), (snap) => {
         setFoodHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
@@ -54,31 +56,72 @@ export const useTitanData = () => {
     };
   }, [user, authLoading]);
 
+  // Actions - Also writing to artifacts/titan-73b02
   const actions = {
-    saveProfile: async (data) => { if(user) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), data, { merge: true }); },
-    updateWorkoutPlan: async (dayId, data) => { if(user) await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workouts', dayId), { ...data, order: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].indexOf(data.day) }); },
-    saveWorkoutLog: async (log, dateStr) => { if(user) await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'workout_logs'), { ...log, date: dateStr, timestamp: serverTimestamp() }); },
-    deleteWorkoutLog: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workout_logs', id)); },
-    saveWeight: async (weight, dateStr) => { if(user) await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'weight_logs'), { weight: parseFloat(weight), date: dateStr }); },
-    
+    saveProfile: async (data) => {
+        if(!user) return;
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid), data, { merge: true });
+    },
+    updateWorkoutPlan: async (dayId, data) => {
+        if(!user) return;
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workouts', dayId), { ...data, order: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].indexOf(data.day) });
+    },
+    saveWorkoutLog: async (log, dateStr) => {
+        if(!user) return;
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'workout_logs'), { ...log, date: dateStr, timestamp: serverTimestamp() });
+    },
+    deleteWorkoutLog: async (id) => {
+        if(!user) return;
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'workout_logs', id));
+    },
+    saveWeight: async (weight, dateStr) => {
+        if(!user) return;
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'weight_logs'), { weight: parseFloat(weight), date: dateStr });
+    },
     saveFood: async (foodData, dateStr, mealType) => {
         if(!user) return;
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), { ...foodData, date: dateStr, mealType, timestamp: serverTimestamp() });
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_history'), { ...foodData, lastUsed: serverTimestamp() });
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), {
+            ...foodData,
+            date: dateStr,
+            mealType,
+            timestamp: serverTimestamp()
+        });
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_history'), {
+            ...foodData,
+            lastUsed: serverTimestamp()
+        });
     },
-    deleteFood: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id)); },
-    
+    deleteFood: async (id) => {
+        if(!user) return;
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id));
+    },
     saveRecipe: async (mealData) => {
         if(!user) return;
-        if (mealData.id) { const { id, ...rest } = mealData; await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id), rest); } 
-        else { await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'custom_meals'), mealData); }
+        if (mealData.id) {
+            const { id, ...rest } = mealData;
+            await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id), rest);
+        } else {
+            await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'custom_meals'), mealData);
+        }
     },
-    deleteRecipe: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id)); },
-    
-    deleteHistoryItem: async (id) => { 
-        if (user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_history', id)); 
+    deleteRecipe: async (id) => {
+        if(!user) return;
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id));
+    },
+    deleteHistoryItem: async (id) => {
+        if (!user) return;
+        try {
+            await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_history', id));
+        } catch (err) {
+            console.error("Failed to delete history item:", err);
+        }
     }
   };
 
-  return { user, authLoading, loading, workouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, foodHistory, actions };
+  return { 
+    user, authLoading, loading, 
+    workouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, 
+    foodHistory, 
+    actions 
+  };
 };
