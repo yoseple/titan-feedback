@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Dashboard from './components/Dashboard';
 import Settings from './pages/Settings';
@@ -13,6 +14,7 @@ const PrivateRoute = ({ children }) => {
 
 function App() {
   return (
+    <ErrorBoundary>
     <Router>
       <AuthProvider>
         <Routes>
@@ -40,6 +42,7 @@ function App() {
         </Routes>
       </AuthProvider>
     </Router>
+    </ErrorBoundary>
   );
 }
 

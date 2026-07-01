@@ -1,9 +1,9 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getAnalytics } from "firebase/analytics"; 
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { getAnalytics, isSupported } from "firebase/analytics";
 
-// FIX: Hardcoded keys to guarantee connection on Localhost & Mobile
+// Firebase web config is expected-public (protected by Firestore rules + App Check).
 const firebaseConfig = {
   apiKey: "AIzaSyAbXeadJcYu4KRfoAJGxm8rhVnG4oMrd1I",
   authDomain: "titan-73b02.firebaseapp.com",
@@ -17,6 +17,17 @@ const firebaseConfig = {
 // Initialize Firebase
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const analytics = getAnalytics(app);
+
+// Firestore with a durable offline cache: a gym PWA loses connectivity constantly,
+// so serve reads from cache and queue writes (a logged set/food) until reconnect
+// instead of failing/losing them.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+
+// Analytics is privacy-sensitive on a health app — only initialize where actually
+// supported (never during unsupported/SSR contexts). Gate behind real consent later.
+export let analytics = null;
+isSupported().then((ok) => { if (ok) analytics = getAnalytics(app); }).catch(() => {});
+
 export const appId = 'titan-73b02';

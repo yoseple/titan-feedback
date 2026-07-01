@@ -22,7 +22,8 @@ export default function Settings({ onClose }) {
   // Load Data
   useEffect(() => {
     async function loadData() {
-      if (currentUser) {
+      if (!currentUser) { setLoading(false); return; }
+      try {
         const data = await getUserProfile(currentUser.uid);
         if (data) {
            setFormData(prev => ({ ...prev, ...data }));
@@ -32,6 +33,10 @@ export default function Settings({ onClose }) {
               setInches(Math.round(totalInches % 12));
            }
         }
+      } catch (e) {
+        // Don't hang on the loading spinner forever if the profile read fails (B13).
+        console.error('Failed to load profile', e);
+      } finally {
         setLoading(false);
       }
     }
