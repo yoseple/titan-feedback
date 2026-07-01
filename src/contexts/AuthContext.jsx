@@ -1,14 +1,17 @@
 // src/contexts/AuthContext.jsx
 import React, { useContext, useState, useEffect } from "react";
 import { auth } from "../lib/firebase"; 
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
-  GoogleAuthProvider, // <--- NEW IMPORT
-  signInWithPopup     // <--- NEW IMPORT
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult
 } from "firebase/auth";
+import { track } from "../lib/analytics";
 
 const AuthContext = React.createContext();
 
@@ -29,10 +32,26 @@ export function AuthProvider({ children }) {
     return signInWithEmailAndPassword(auth, email, password);
   }
 
-  // --- NEW: GOOGLE SIGN IN FUNCTION ---
+  // Google sign-in. Popups are unreliable in installed/standalone PWAs (especially
+  // iOS), so use the full-page redirect flow there, and fall back to redirect if a
+  // popup is blocked; keep the popup on desktop where it's the nicer UX.
   function googleLogin() {
     const provider = new GoogleAuthProvider();
-    return signInWithPopup(auth, provider);
+    const standalone =
+      window.matchMedia?.("(display-mode: standalone)")?.matches ||
+      window.navigator?.standalone === true;
+    if (standalone) return signInWithRedirect(auth, provider);
+    return signInWithPopup(auth, provider).catch((err) => {
+      const code = err?.code;
+      if (
+        code === "auth/popup-blocked" ||
+        code === "auth/operation-not-supported-in-this-environment" ||
+        code === "auth/cancelled-popup-request"
+      ) {
+        return signInWithRedirect(auth, provider);
+      }
+      throw err;
+    });
   }
 
   function logout() {
@@ -40,6 +59,14 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
+    // Complete a pending redirect sign-in (no-op for the popup flow); surface errors
+    // and record the login once the redirect returns.
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) track("login", { method: "google" });
+      })
+      .catch((err) => console.error("Redirect sign-in failed:", err));
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setLoading(false);
