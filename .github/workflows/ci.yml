@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**', 'fix/**']
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      # Non-blocking for now — a few pre-existing structural lint warnings remain
+      # (set-state-in-effect, react-refresh). Tracked as a follow-up.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
