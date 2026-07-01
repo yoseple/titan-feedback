@@ -7,13 +7,14 @@ import {
 } from 'lucide-react';
 
 // --- IMPORTS ---
-import { generateContent } from '../lib/ai';
+import { generateContent, aiQuota } from '../lib/ai';
 import { INITIAL_MEALS, DEFAULT_WORKOUTS } from '../data/defaults';
 import { useTitanData } from '../hooks/useTitanData';
 import { categorizeFood, searchUSDA, searchAI, computeMacroTargets } from '../utils/nutrition';
 import { getLocalDate } from '../utils/date';
 import { normalizeFoodData, getBaseGramWeight, convertQuantity, getPortions } from '../domain/foodMath';
 import { useFoodLogging } from '../hooks/useFoodLogging';
+import { deriveUserContext, formatUserContext, formatChatMemory } from '../domain/coach';
 
 // --- MODALS & COMPONENTS ---
 import Onboarding from './modals/Onboarding'; 
@@ -90,6 +91,7 @@ const Dashboard = () => {
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState([{ role: 'ai', content: "I am Titan. I can update your workout plans and create meals for you." }]);
   const [isChatProcessing, setIsChatProcessing] = useState(false);
+  const [chatQuota, setChatQuota] = useState(null);
   const chatEndRef = useRef(null);
 
   useEffect(() => { 
@@ -227,10 +229,13 @@ const Dashboard = () => {
         }));
 
         const systemPrompt = `
-You are Titan, a database-management AI for fitness. 
+You are Titan, a database-management AI for fitness.
 User Goal: ${userProfile?.goal || 'general fitness'}
 Injuries: ${userProfile?.injuries || 'none'}
+User Context: ${formatUserContext(deriveUserContext({ profile: userProfile || {}, weightLog, foodLogs: foodLog, today: getLocalDate(viewDate) }))}
 Current Schedule: ${JSON.stringify(simpleSchedule)}
+Recent conversation (for continuity):
+${formatChatMemory(chatHistory, 6)}
 
 PRIME DIRECTIVE:
 You prefer ACTION over SPEECH. 
@@ -279,7 +284,8 @@ SCENARIO 3: User says "How do I lose weight?" (Only then use advice)
 Request: "${msg}"
 `;
         
-        const data = await generateContent(systemPrompt, 'chat'); 
+        const data = await generateContent(systemPrompt, 'chat');
+        if (aiQuota.chat != null) setChatQuota(aiQuota.chat);
 
         if (!data) throw new Error("No data returned");
         
@@ -551,7 +557,7 @@ Request: "${msg}"
           {activeTab === 'coach' && (
             <div className="h-[calc(100vh-180px)] flex flex-col animate-in fade-in duration-300">
                 <div className="flex-1 bg-gray-800 rounded-t-xl border border-gray-700 border-b-0 overflow-y-auto p-4 space-y-4 shadow-inner">
-                    <div className="flex justify-center mb-4"><span className="text-xs font-bold text-gray-600 bg-gray-900 px-3 py-1 rounded-full uppercase tracking-wider">Titan AI Active</span></div>
+                    <div className="flex justify-center mb-4"><span className="text-xs font-bold text-gray-600 bg-gray-900 px-3 py-1 rounded-full uppercase tracking-wider">Titan AI Active{chatQuota != null && ` · ${chatQuota} chats left`}</span></div>
                     {chatHistory.map((m, i) => (
                         <div key={i} className={`flex ${m.role==='user'?'justify-end':'justify-start'}`}>
                             <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.role==='user'?'bg-blue-600 text-white rounded-br-none':'bg-gray-700 text-gray-200 rounded-bl-none'}`}>

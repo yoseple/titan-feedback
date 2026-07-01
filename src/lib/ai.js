@@ -5,6 +5,10 @@ import { app } from "./firebase";
 // Initialize Cloud Functions
 const functions = getFunctions(app, "us-central1");
 
+// Latest remaining daily quota the function reported, by type. The UI can read this
+// to show "N chats left" instead of only discovering the limit when it's hit.
+export const aiQuota = { chat: null, search: null };
+
 /**
  * Calls the 'generateAI' Cloud Function.
  * Includes robust parsing to handle Markdown wrappers and conversational fluff.
@@ -17,6 +21,9 @@ export const generateContent = async (prompt, type = 'chat') => {
 
     // The function now returns { text, remaining }; tolerate the legacy raw-string shape too.
     const payload = result.data;
+    if (payload && typeof payload === 'object' && typeof payload.remaining === 'number') {
+      aiQuota[type] = payload.remaining;
+    }
     let text = (payload && typeof payload === 'object') ? payload.text : payload;
     if (!text || typeof text !== 'string') return null;
 
