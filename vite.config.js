@@ -38,4 +38,15 @@ export default defineConfig({
       }
     })
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Split heavy vendors into their own cacheable chunks (change rarely).
+        manualChunks(id) {
+          if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) return 'firebase';
+          if (id.includes('node_modules/react-router')) return 'reactvendor';
+        },
+      },
+    },
+  },
 })

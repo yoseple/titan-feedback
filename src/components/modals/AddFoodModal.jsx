@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { Search, Loader, Wand2, X, Plus, Clock, Bookmark, ScanBarcode, Camera, Trash2, Flame } from 'lucide-react';
-import { Scanner } from '@yudiel/react-qr-scanner';
+
+// Defer the QR scanner (a wasm engine) until the Scan tab is actually opened.
+const Scanner = lazy(() => import('@yudiel/react-qr-scanner').then((m) => ({ default: m.Scanner })));
 import { searchAllFood, getSuggestions, searchByBarcode, searchAI } from '../../utils/nutrition';
 import { generateContent } from '../../lib/ai';
 import { useTitanData } from '../../hooks/useTitanData';
@@ -171,12 +173,14 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
               {isScanning && (
                   <div className="h-full flex flex-col items-center justify-start pt-4 relative">
                       <div className="w-full aspect-square max-w-sm rounded-3xl overflow-hidden border-2 border-emerald-500/50 relative bg-black shadow-2xl">
-                          <Scanner 
-                             onScan={handleScan} 
-                             options={{ delayBetweenScanAttempts: 200 }} 
-                             components={{ audio: false, finder: false }} // SILENT MODE
-                             allowMultiple={true} 
-                          />
+                          <Suspense fallback={<div className="w-full h-full flex items-center justify-center bg-black"><Loader className="w-10 h-10 animate-spin text-emerald-500"/></div>}>
+                            <Scanner
+                               onScan={handleScan}
+                               options={{ delayBetweenScanAttempts: 200 }}
+                               components={{ audio: false, finder: false }} // SILENT MODE
+                               allowMultiple={true}
+                            />
+                          </Suspense>
                           <div className="absolute inset-0 border-[30px] border-black/50 pointer-events-none"></div>
                           
                           {/* VISUAL INDICATOR */}
