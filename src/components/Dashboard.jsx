@@ -15,6 +15,9 @@ import { getLocalDate } from '../utils/date';
 import { normalizeFoodData, getBaseGramWeight, convertQuantity, getPortions } from '../domain/foodMath';
 import { useFoodLogging } from '../hooks/useFoodLogging';
 import { deriveUserContext, formatUserContext, formatChatMemory, parseCoachAction } from '../domain/coach';
+import { weeklyCalories } from '../domain/trends';
+import { useToast } from '../components/Toast';
+import { track } from '../lib/analytics';
 
 // --- MODALS & COMPONENTS ---
 import Onboarding from './modals/Onboarding'; 
@@ -41,6 +44,7 @@ const MEAL_SECTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const toast = useToast();
   const { user, authLoading, workouts: rawWorkouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, actions } = useTitanData();
   // New users have no saved workout docs yet — fall back to the default 7-day plan so the app
   // isn't stuck showing "Rest Day" every day. Onboarding also seeds these; editing a day persists it.
@@ -70,7 +74,14 @@ const Dashboard = () => {
     addingToMeal, setAddingToMeal, scannedResult, setScannedResult,
     numServings, setNumServings, servingUnit, setServingUnit,
     calculationData, handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog,
-  } = useFoodLogging({ actions, viewDate });
+  } = useFoodLogging({
+    actions,
+    viewDate,
+    onLogged: (payload, isEdit) => {
+      toast(`${isEdit ? 'Updated' : 'Logged'} ${payload.name} · ${payload.calories} cal`, 'success');
+      track('food_logged', { method: payload.unit });
+    },
+  });
 
   // Chat State
   const [chatInput, setChatInput] = useState('');
@@ -191,6 +202,7 @@ const Dashboard = () => {
   // above only covers the brief window before these writes land).
   const handleOnboardingComplete = async (profileData) => {
       await actions.saveProfile(profileData);
+      track('onboarding_complete', { goal: profileData.goal });
       try {
           await Promise.all(DEFAULT_WORKOUTS.map(w => actions.updateWorkoutPlan(w.id, w)));
       } catch (e) {
@@ -199,14 +211,15 @@ const Dashboard = () => {
   };
 
   // --- AI HANDLER (UPDATED FOR ACTION-FIRST) ---
-  const handleChatSubmit = async (e) => {
-    e.preventDefault(); 
-    if (!chatInput.trim() || isChatProcessing) return;
-    
-    const msg = chatInput; 
-    setChatInput(''); 
-    setChatHistory(p => [...p, { role: 'user', content: msg }]); 
+  const handleChatSubmit = async (e, forced) => {
+    if (e) e.preventDefault();
+    const msg = (forced ?? chatInput).trim();
+    if (!msg || isChatProcessing) return;
+
+    if (!forced) setChatInput('');
+    setChatHistory(p => [...p, { role: 'user', content: msg }]);
     setIsChatProcessing(true);
+    track('ai_chat');
     
     try {
         const simpleSchedule = workouts.map(w => ({ 
@@ -391,6 +404,7 @@ Request: "${msg}"
   // (single source of truth — replaces the old hardcoded 250/80 + weightLog-derived protein).
   const macroTargets = userProfile?.macroTargets
     || computeMacroTargets(tdee, userProfile?.goal, userProfile?.weight || weightLog[0]?.weight);
+  const weekCals = weeklyCalories(foodLog, formattedDate);
   const calsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.calories || 0), 0);
   const protConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.protein || 0), 0);
   const carbsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.carbs || 0), 0);
@@ -546,7 +560,7 @@ Request: "${msg}"
                            className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500 transition"
                        />
                        <button
-                           onClick={() => { const w = parseFloat(weightInput); if (w > 0) { actions.saveWeight(w, formattedDate); setWeightInput(''); } }}
+                           onClick={() => { const w = parseFloat(weightInput); if (w > 0) { actions.saveWeight(w, formattedDate); setWeightInput(''); toast(`Logged ${w} lb`, 'success'); track('weight_logged'); } }}
                            disabled={!(parseFloat(weightInput) > 0)}
                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-5 rounded-xl font-bold active:scale-95 transition"
                        >
@@ -565,6 +579,24 @@ Request: "${msg}"
                  fats={fatsConsumed}
                  fatsGoal={macroTargets.fats}
                />
+
+               {/* 7-DAY CALORIE TREND */}
+               <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-lg">
+                   <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">This Week</h4>
+                   <div className="flex items-end justify-between gap-2 h-24">
+                       {weekCals.map((d, i) => {
+                           const pct = Math.min(100, Math.round((d.calories / (tdee || 2000)) * 100));
+                           const over = d.calories > tdee;
+                           return (
+                               <div key={i} className="flex-1 flex flex-col items-center justify-end h-full gap-1">
+                                   <div className={`w-full rounded-t transition-all ${d.calories === 0 ? 'bg-gray-700' : over ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ height: `${Math.max(4, pct)}%` }} title={`${d.calories} cal`}></div>
+                                   <span className="text-[9px] text-gray-500 font-bold">{d.label}</span>
+                               </div>
+                           );
+                       })}
+                   </div>
+                   <div className="text-[10px] text-gray-500 mt-2 text-right">Target {tdee} cal/day</div>
+               </div>
                
                <div className="space-y-4">
                    {MEAL_SECTIONS.map(mealType => { 
@@ -607,6 +639,13 @@ Request: "${msg}"
             <div className="h-[calc(100vh-180px)] flex flex-col animate-in fade-in duration-300">
                 <div className="flex-1 bg-gray-800 rounded-t-xl border border-gray-700 border-b-0 overflow-y-auto p-4 space-y-4 shadow-inner">
                     <div className="flex justify-center mb-4"><span className="text-xs font-bold text-gray-600 bg-gray-900 px-3 py-1 rounded-full uppercase tracking-wider">Titan AI Active{chatQuota != null && ` · ${chatQuota} chats left`}</span></div>
+                    {chatHistory.length <= 1 && !isChatProcessing && (
+                        <div className="flex flex-wrap gap-2 justify-center mb-2">
+                            {['Give me a chest day for Monday', 'High-protein breakfast idea', 'Why is protein important?'].map(s => (
+                                <button key={s} onClick={() => handleChatSubmit(null, s)} className="text-xs bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full hover:border-blue-500/50 active:scale-95 transition">{s}</button>
+                            ))}
+                        </div>
+                    )}
                     {chatHistory.map((m, i) => (
                         <div key={i} className={`flex ${m.role==='user'?'justify-end':'justify-start'}`}>
                             <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.role==='user'?'bg-blue-600 text-white rounded-br-none':'bg-gray-700 text-gray-200 rounded-bl-none'}`}>

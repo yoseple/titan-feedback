@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { track } from '../lib/analytics';
 
 export default function Login() {
   const [error, setError] = useState('');
@@ -25,6 +26,7 @@ export default function Login() {
       
       // We wait for the popup flow to complete
       await googleLogin();
+      track('login', { method: 'google' });
       
       // IMPORTANT: Do NOT navigate() here.
       // The useEffect above will detect the new user and redirect automatically.

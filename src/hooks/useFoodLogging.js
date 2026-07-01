@@ -9,7 +9,7 @@ import {
 // the item under review (scannedResult, carrying its immutable basis), the chosen
 // amount/unit, the live macro calc, and the confirm/edit handlers. Extracted from
 // Dashboard to shrink the god-component and keep the logging logic in one place.
-export function useFoodLogging({ actions, viewDate }) {
+export function useFoodLogging({ actions, viewDate, onLogged }) {
   const [addingToMeal, setAddingToMeal] = useState(null);
   const [scannedResult, setScannedResult] = useState(null);
   const [numServings, setNumServings] = useState(1);
@@ -60,6 +60,7 @@ export function useFoodLogging({ actions, viewDate }) {
       && !scannedResult.id.toString().startsWith('ai_');
     if (isExistingLog) actions.updateFood(scannedResult.id, payload, dateStr, mealType);
     else actions.saveFood(payload, dateStr, mealType);
+    if (onLogged) onLogged(payload, isExistingLog);
     setScannedResult(null);
     setAddingToMeal(null);
   };
