@@ -9,8 +9,9 @@ import {
 // --- IMPORTS ---
 import { generateContent } from '../lib/ai';
 import { INITIAL_MEALS, DEFAULT_WORKOUTS } from '../data/defaults';
-import { useTitanData } from '../hooks/useTitanData'; 
-import { categorizeFood, searchUSDA, calculateTDEE, searchAI } from '../utils/nutrition'; 
+import { useTitanData } from '../hooks/useTitanData';
+import { categorizeFood, searchUSDA, searchAI, computeMacroTargets } from '../utils/nutrition';
+import { getLocalDate } from '../utils/date';
 
 // --- MODALS & COMPONENTS ---
 import Onboarding from './modals/Onboarding'; 
@@ -26,12 +27,8 @@ import MealCard from './cards/MealCard';
 const MEAL_SECTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 
 // --- HELPERS ---
-
-const getLocalDate = (date) => {
-  const d = new Date(date);
-  const offset = d.getTimezoneOffset() * 60000;
-  return (new Date(d - offset)).toISOString().slice(0, 10);
-};
+// getLocalDate now lives in ../utils/date (shared with ConsistencyHeatmap so day
+// buckets agree). Imported above.
 
 const cleanMacro = (val) => {
   if (typeof val === 'number') return val;
@@ -591,6 +588,10 @@ Request: "${msg}"
   }, [selectedMealIds, allMeals]);
 
   const tdee = userProfile?.caloriesTarget || 2500;
+  // Macro goals: use the user's saved targets, else derive them once from calories/goal/weight
+  // (single source of truth — replaces the old hardcoded 250/80 + weightLog-derived protein).
+  const macroTargets = userProfile?.macroTargets
+    || computeMacroTargets(tdee, userProfile?.goal, userProfile?.weight || weightLog[0]?.weight);
   const calsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.calories || 0), 0);
   const protConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.protein || 0), 0);
   const carbsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.carbs || 0), 0);
@@ -730,15 +731,15 @@ Request: "${msg}"
           {activeTab === 'tracker' && (
             <div className="space-y-6 animate-in fade-in duration-300 pb-safe-bottom">
                <ConsistencyHeatmap workoutLogs={workoutLogs} foodLogs={foodLog} />
-               <CalorieDashboard 
-                 consumed={calsConsumed} 
-                 goal={tdee} 
-                 protein={protConsumed} 
-                 proteinGoal={Math.round((weightLog[0]?.weight || 180))} 
-                 carbs={carbsConsumed} 
-                 carbsGoal={250} 
-                 fats={fatsConsumed} 
-                 fatsGoal={80} 
+               <CalorieDashboard
+                 consumed={calsConsumed}
+                 goal={tdee}
+                 protein={protConsumed}
+                 proteinGoal={macroTargets.protein}
+                 carbs={carbsConsumed}
+                 carbsGoal={macroTargets.carbs}
+                 fats={fatsConsumed}
+                 fatsGoal={macroTargets.fats}
                />
                
                <div className="space-y-4">

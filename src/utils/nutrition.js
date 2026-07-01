@@ -237,7 +237,20 @@ export const calculateTDEE = (weightLbs, heightCm, age, gender, activityLevel = 
 
 export const calculateTargetCalories = (tdee, goal) => {
     let target = tdee;
-    if (goal === 'cut') { target = tdee * 0.80; if (target < 1200) target = 1200; } 
+    if (goal === 'cut') { target = tdee * 0.80; if (target < 1200) target = 1200; }
     else if (goal === 'bulk') { target = tdee * 1.10; }
     return Math.round(target);
+};
+
+// Single source of truth for macro goals. Protein/fat scale with bodyweight;
+// carbs fill the remaining calories; fiber ~14g per 1000 kcal. Replaces the
+// hardcoded 250/80 (Dashboard) and divergent 150/200/60 (CalorieDashboard).
+export const computeMacroTargets = (caloriesTarget, goal = 'maintenance', weightLbs = 180) => {
+    const cals = parseFloat(caloriesTarget) || 2000;
+    const w = parseFloat(weightLbs) || 180;
+    const protein = Math.round(w * (goal === 'cut' ? 1.0 : 0.8)); // g/lb
+    const fats = Math.round(w * 0.35);                            // g/lb
+    const carbs = Math.max(0, Math.round((cals - (protein * 4) - (fats * 9)) / 4));
+    const fiber = Math.round((cals / 1000) * 14);
+    return { protein, carbs, fats, fiber };
 };

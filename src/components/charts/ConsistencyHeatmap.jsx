@@ -1,9 +1,12 @@
 import React from 'react';
 import { CalendarDays } from 'lucide-react';
+import { getLocalDate } from '../../utils/date';
 
 const ConsistencyHeatmap = ({ workoutLogs, foodLogs }) => {
   const days = Array.from({ length: 28 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (27 - i)); return d.toISOString().split('T')[0];
+    // Use the same local-date basis the logs are stored with, or the grid shifts a
+    // day for users west/east of UTC and "today" never lights up (B11/B18).
+    const d = new Date(); d.setDate(d.getDate() - (27 - i)); return getLocalDate(d);
   });
   return (
     <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 mb-6">

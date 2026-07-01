@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowRight, Activity, Target, Ruler, Weight, User } from 'lucide-react';
-import { calculateTDEE, calculateTargetCalories } from '../../utils/nutrition';
+import { calculateTDEE, calculateTargetCalories, computeMacroTargets } from '../../utils/nutrition';
 
 const Onboarding = ({ onComplete }) => {
   const [step, setStep] = useState(1);
@@ -23,6 +23,7 @@ const Onboarding = ({ onComplete }) => {
     // 2. Calculate TDEE
     const tdee = calculateTDEE(data.weight, heightCm, data.age, data.gender, data.activityLevel);
     const target = calculateTargetCalories(tdee, data.goal);
+    const macroTargets = computeMacroTargets(target, data.goal, data.weight);
 
     // 3. Save
     onComplete({
@@ -30,6 +31,7 @@ const Onboarding = ({ onComplete }) => {
       height: heightCm,
       tdee,
       caloriesTarget: target,
+      macroTargets,
       onboardingComplete: true
     });
   };

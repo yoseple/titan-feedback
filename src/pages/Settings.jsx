@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserProfile, updateUserProfile, submitSupportTicket } from '../services/userService';
-import { calculateTDEE, calculateTargetCalories } from '../utils/nutrition';
+import { calculateTDEE, calculateTargetCalories, computeMacroTargets } from '../utils/nutrition';
 import { MessageSquare, Send, Loader, X, LogOut, Github } from 'lucide-react'; // Added Github icon
 
 export default function Settings({ onClose }) {
@@ -57,12 +57,14 @@ export default function Settings({ onClose }) {
       const heightCm = Math.round((ftVal * 30.48) + (inVal * 2.54));
       const tdee = calculateTDEE(formData.weight, heightCm, formData.age, formData.gender, formData.activityLevel);
       const target = calculateTargetCalories(tdee, formData.goal);
+      const macroTargets = computeMacroTargets(target, formData.goal, formData.weight);
 
       const payload = {
           ...formData,
           height: heightCm,
           tdee,
           caloriesTarget: target,
+          macroTargets,
           updatedAt: new Date().toISOString()
       };
 
