@@ -8,7 +8,7 @@ import {
 
 // --- IMPORTS ---
 import { generateContent } from '../lib/ai';
-import { INITIAL_MEALS } from '../data/defaults';
+import { INITIAL_MEALS, DEFAULT_WORKOUTS } from '../data/defaults';
 import { useTitanData } from '../hooks/useTitanData'; 
 import { categorizeFood, searchUSDA, calculateTDEE, searchAI } from '../utils/nutrition'; 
 
@@ -84,7 +84,7 @@ const convertQuantity = (amount, fromUnit, toUnit, baseWeightInGrams) => {
     if (toUnit === 'oz') return parseFloat((grams / OZ).toFixed(2));
     if (toUnit === 'floz') return parseFloat((grams / FLOZ).toFixed(2));
     if (toUnit === 'serving') {
-        if (!baseWeightInGrams) return amount;
+        if (!baseWeightInGrams) return 1; // unknown base -> 1 serving, never carry the gram count over (prevents ~100x blow-up)
         return parseFloat((grams / baseWeightInGrams).toFixed(2));
     }
 
@@ -142,8 +142,11 @@ const normalizeId = (input) => {
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { user, authLoading, workouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, actions } = useTitanData();
-  
+  const { user, authLoading, workouts: rawWorkouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, actions } = useTitanData();
+  // New users have no saved workout docs yet — fall back to the default 7-day plan so the app
+  // isn't stuck showing "Rest Day" every day. Onboarding also seeds these; editing a day persists it.
+  const workouts = (rawWorkouts && rawWorkouts.length > 0) ? rawWorkouts : DEFAULT_WORKOUTS;
+
   const [activeTab, setActiveTab] = useState('workouts');
   const [viewDate, setViewDate] = useState(new Date());
   
@@ -199,15 +202,19 @@ const Dashboard = () => {
   const handleFoodSelect = (foodItem) => {
       const clean = normalizeFoodData(foodItem);
       setScannedResult(clean);
-      setAddingToMeal(foodItem.targetMeal || addingToMeal); 
-      
-      // Default to 'g' logic
-      setServingUnit('g');
-      if (clean.weight_amount === '100g' || clean.weight_amount.toLowerCase().startsWith('100g')) {
-          setNumServings(100);
+      setAddingToMeal(foodItem.targetMeal || addingToMeal);
+
+      // Pick the default unit from the food's base weight. Foods with a real gram base (e.g.
+      // "100g", "45 g") default to grams so the amount scales macros. Foods with NO gram base
+      // (e.g. "1 serving", AI estimates) are serving-only — defaulting them to grams either did
+      // nothing when edited or, after a unit switch, inflated macros ~100x.
+      const base = getBaseGramWeight(clean.weight_amount);
+      if (base) {
+          setServingUnit('g');
+          setNumServings(base);
       } else {
-          const base = getBaseGramWeight(clean.weight_amount);
-          setNumServings(base || 100); 
+          setServingUnit('serving');
+          setNumServings(1);
       }
   };
 
@@ -293,7 +300,23 @@ const Dashboard = () => {
           if (textPart === 'g' || textPart === 'grams') currentUnit = 'g';
           else if (textPart === 'oz' || textPart === 'ounces') currentUnit = 'oz';
           else if (textPart === 'floz' || textPart === 'fl oz') currentUnit = 'floz';
-          else if (textPart.startsWith('x ')) currentUnit = 'serving'; 
+          else if (textPart.startsWith('x ')) {
+              // Serving-format label like "2 x 100g": the stored macros were ALREADY scaled by the
+              // serving count at log time. Divide back to the true per-serving base and restore the
+              // original base label, so the smart calculator re-applies the multiplier exactly once.
+              // (Previously it re-multiplied the stored total, doubling calories on every re-edit.)
+              currentUnit = 'serving';
+              const divisor = currentAmount > 0 ? currentAmount : 1;
+              baseStats.calories = Math.round((baseStats.calories || 0) / divisor);
+              baseStats.protein  = Math.round((baseStats.protein  || 0) / divisor);
+              baseStats.carbs    = Math.round((baseStats.carbs    || 0) / divisor);
+              baseStats.fats     = Math.round((baseStats.fats     || 0) / divisor);
+              baseStats.weight_amount = match[3].slice(2).trim() || "1 serving";
+              setNumServings(currentAmount);
+              setServingUnit(currentUnit);
+              setScannedResult({ ...baseStats, mealType: logItem.mealType, id: logItem.id });
+              return;
+          }
       }
 
       if (currentAmount > 0) {
@@ -404,6 +427,18 @@ const Dashboard = () => {
   };
 
   const handleSaveRecipeWrapper = () => { actions.saveRecipe(editingMeal); setEditingMeal(null); };
+
+  // Onboarding completion: save the profile AND seed the default 7-day workout plan so a new
+  // user starts with a real, editable plan persisted in Firestore (the client-side fallback
+  // above only covers the brief window before these writes land).
+  const handleOnboardingComplete = async (profileData) => {
+      await actions.saveProfile(profileData);
+      try {
+          await Promise.all(DEFAULT_WORKOUTS.map(w => actions.updateWorkoutPlan(w.id, w)));
+      } catch (e) {
+          console.warn('Default workout seeding failed', e);
+      }
+  };
 
   // --- AI HANDLER (UPDATED FOR ACTION-FIRST) ---
   const handleChatSubmit = async (e) => {
@@ -519,7 +554,10 @@ Request: "${msg}"
 
   // --- RENDER HELPERS ---
   const formattedDate = getLocalDate(viewDate);
-  const activeWorkout = workouts.find(w => w.day === viewDate.toLocaleDateString('en-US', { weekday: 'long' })) || workouts[0];
+  // Only show the plan that matches today's weekday. If a customized plan has no entry for this
+  // day, activeWorkout is undefined and the real "Rest Day" empty state shows (was: always workouts[0],
+  // which showed Monday's plan on an unplanned day).
+  const activeWorkout = workouts.find(w => w.day === viewDate.toLocaleDateString('en-US', { weekday: 'long' }));
 
   const activeFoodLogs = foodLog.filter(f => {
       if (!f.date) return false;
@@ -560,7 +598,7 @@ Request: "${msg}"
 
   if (authLoading) return <div className="h-screen flex items-center justify-center bg-gray-900 text-white"><Loader className="animate-spin w-10 h-10 text-blue-500"/></div>;
   if (!user) return null;
-  if (user && userProfile === null) return <Onboarding onComplete={actions.saveProfile} />;
+  if (user && userProfile === null) return <Onboarding onComplete={handleOnboardingComplete} />;
 
   return (
     <div className="flex flex-col h-screen bg-slate-900 font-sans text-gray-100 overflow-hidden relative touch-pan-x selection:bg-blue-500/30">
@@ -842,11 +880,17 @@ Request: "${msg}"
                                   onChange={(e) => handleUnitChange(e.target.value)}
                                   className="appearance-none bg-gray-800 text-emerald-400 font-bold text-sm px-3 py-2 rounded-lg border border-gray-700 outline-none focus:border-emerald-500 pr-8"
                               >
-                                  {/* Logic: Only show serving if specific base weight logic requires it, otherwise prioritize standard units */}
+                                  {/* Weight units only make sense when the food has a known gram base.
+                                      For serving-only foods (no parseable grams) we hide g/oz/floz so the
+                                      amount can't be reinterpreted as grams and blow the macros up ~100x. */}
                                   <option value="serving">Serving</option>
-                                  <option value="g">Grams</option>
-                                  <option value="oz">Oz</option>
-                                  <option value="floz">Fl Oz</option>
+                                  {calculationData.baseWeight && (
+                                    <>
+                                      <option value="g">Grams</option>
+                                      <option value="oz">Oz</option>
+                                      <option value="floz">Fl Oz</option>
+                                    </>
+                                  )}
                               </select>
                               <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
                                   <ChevronDown size={12} />
