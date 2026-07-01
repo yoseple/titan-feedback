@@ -1,0 +1,48 @@
+rules_version = '2';
+
+// Titan Firestore security rules.
+// Data model (see the Titan brain "Titan Facts"): all per-user data lives under
+// artifacts/{appId}/users/{uid}/**. food_cache + user_usage + support_tickets are
+// shared/server collections. Deploy with: firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // --- Per-user private tree: profile doc + all subcollections (workouts,
+    // workout_logs, weight_logs, food_logs, custom_meals, food_history).
+    // Only the authenticated owner can read or write their own data.
+    match /artifacts/{appId}/users/{uid}/{document=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // --- Shared food-search cache. Any signed-in user may read. Writes are
+    // restricted to authenticated CREATES only (no overwrite/delete), which
+    // limits cache poisoning. Full lockdown (server-only writes via a search
+    // proxy) is the follow-up — see the Titan Improvement Roadmap.
+    match /food_cache/{doc} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    // --- AI daily-quota counters. Written ONLY by the Cloud Function via the
+    // Admin SDK (which bypasses these rules), so clients can never reset their
+    // own quota. Owner may read their own counters.
+    match /user_usage/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // --- Support tickets (uid/email mapping for GitHub issues). Server-only.
+    match /support_tickets/{doc} {
+      allow read, write: if false;
+    }
+
+    // --- Default deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
