@@ -1,8 +1,20 @@
-import { db } from "../lib/firebase"; 
-import { collection, query, limit, addDoc, orderBy, getDocs } from "firebase/firestore";
-import { generateContent } from "../lib/ai"; 
+import { db, app } from "../lib/firebase";
+import { collection, query, limit, orderBy, getDocs } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { generateContent } from "../lib/ai";
 
-const USDA_API_KEY = 'FwJSd1knWWtSYLVfwdlh2Twc01RI3Rp1E1odh3Us'; 
+// Food search runs server-side (the `searchFood` callable) so the USDA key stays
+// off the client and USDA/OpenFoodFacts results are normalized + cached in one place.
+const functions = getFunctions(app, "us-central1");
+const callSearchFood = async (payload) => {
+  try {
+    const res = await httpsCallable(functions, 'searchFood')(payload);
+    return (res.data && res.data.results) || [];
+  } catch (e) {
+    console.warn("Food search failed:", e);
+    return [];
+  }
+};
 
 const cleanText = (str) => {
   if (!str) return '';
@@ -49,61 +61,13 @@ export const getSuggestions = async (searchQuery) => {
   }
 };
 
-export const saveToCache = async (items) => {
-  if (!items || items.length === 0) return;
-  const topResult = items[0]; 
-  
-  if (!topResult.name || topResult.name === "Unknown") return;
+// saveToCache removed — the server-side `searchFood` callable now writes food_cache
+// via the Admin SDK; Firestore rules make food_cache client read-only (no poisoning).
 
-  try {
-    const cacheRef = collection(db, 'food_cache');
-    await addDoc(cacheRef, {
-      ...topResult,
-      name_lower: cleanText(topResult.name), 
-      cachedAt: new Date().toISOString()
-    });
-  } catch (err) {
-    console.warn("Cache Write Error:", err);
-  }
-};
-
-// --- 2. BARCODE SEARCH (ROBUST MACROS) ---
+// --- 2. BARCODE SEARCH (server-proxied, keyless OFF lookup) ---
 export const searchByBarcode = async (barcode) => {
-  try {
-    const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
-    const data = await response.json();
-    
-    if (data.status === 1 && data.product) {
-       const p = data.product;
-       const n = p.nutriments || {};
-
-       // Helper to safely get nutrient values checking multiple keys
-       const val = (...keys) => {
-           for (const k of keys) {
-               if (n[k] !== undefined && n[k] !== null && n[k] !== '') return parseFloat(n[k]);
-           }
-           return 0;
-       };
-
-       return {
-         id: `off_${p.code}`,
-         name: p.product_name || "Unknown Product",
-         brand: p.brands || "Generic",
-         // Aggressively look for values
-         calories: Math.round(val('energy-kcal_100g', 'energy-kcal', 'energy-kcal_value', 'energy_100g')),
-         protein: Math.round(val('proteins_100g', 'proteins', 'proteins_value')),
-         carbs: Math.round(val('carbohydrates_100g', 'carbohydrates', 'carbohydrates_value')),
-         fats: Math.round(val('fat_100g', 'fat', 'fat_value')),
-         // Macros above are per-100g, so label the base as 100g. Labeling it with the product
-         // serving_size (e.g. "45 g") while keeping per-100g numbers over/under-counted on log.
-         weight_amount: "100g",
-         source: 'Scan 📸'
-       };
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  const results = await callSearchFood({ mode: 'barcode', barcode });
+  return results[0] || null;
 };
 
 // --- 3. TITAN AI SEARCH ---
@@ -129,100 +93,13 @@ export const searchAI = async (query) => {
     return null;
 };
 
-// --- 4. EXTERNAL APIS ---
-export const searchUSDA = async (query) => {
-  try {
-    // Single-Pass Extraction (Fast)
-    const searchUrl = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}&pageSize=20&dataType=Branded,Foundation,SR Legacy&api_key=${USDA_API_KEY}`;
-    const searchRes = await fetch(searchUrl);
-    const searchData = await searchRes.json();
-    if (!searchData.foods || searchData.foods.length === 0) return [];
+// --- 4. EXTERNAL FOOD SEARCH (server-proxied USDA + OpenFoodFacts) ---
+// The USDA key, fetching, and kcal/per-100g normalization now live in the
+// `searchFood` Cloud Function. These are thin callable wrappers.
+export const searchAllFood = async (query) => callSearchFood({ mode: 'search', query });
 
-    return searchData.foods.map(item => {
-      const nutrients = item.foodNutrients || [];
-      const getNut = (id1, id2) => {
-         const n = nutrients.find(x => x.nutrientNumber === id1 || x.nutrientNumber === id2);
-         return n ? (n.value || 0) : 0;
-      };
-      // Energy: prefer kcal (nutrient 208 / unit KCAL). Only fall back to kJ (268) WITH the
-      // 4.184 conversion — never return a raw kilojoule value as kcal (that inflated calories
-      // ~4.184x whenever the kJ entry was listed before the kcal entry, which USDA does not order).
-      const getEnergyKcal = () => {
-         const kcal = nutrients.find(x => x.nutrientNumber === '208' || (x.unitName && x.unitName.toUpperCase() === 'KCAL'));
-         if (kcal && kcal.value) return kcal.value;
-         const kj = nutrients.find(x => x.nutrientNumber === '268' || (x.unitName && x.unitName.toUpperCase() === 'KJ'));
-         if (kj && kj.value) return kj.value / 4.184;
-         return 0;
-      };
-      
-      let servingLabel = "100g"; 
-      let ratio = 1;
-
-      if (item.servingSize && item.servingSizeUnit) {
-          const unit = item.servingSizeUnit.toLowerCase();
-          if (unit === 'g' || unit === 'ml') {
-              ratio = item.servingSize / 100;
-              servingLabel = `${item.servingSize} ${item.servingSizeUnit}`;
-          }
-      } else if (item.foodPortions?.[0]) { 
-          servingLabel = "100g";
-      }
-      
-      return {
-        id: `usda_${item.fdcId}`,
-        name: item.description,
-        brand: item.brandOwner || 'Generic',
-        source: 'USDA',
-        category: categorizeFood(item.description),
-        weight_amount: servingLabel,
-        calories: Math.round((getEnergyKcal() || 0) * ratio),
-        protein: Math.round((getNut('203') || 0) * ratio),
-        fats: Math.round((getNut('204') || 0) * ratio),
-        carbs: Math.round((getNut('205') || 0) * ratio),
-      };
-    });
-  } catch { return []; }
-};
-
-export const searchOpenFoodFacts = async (query) => {
-  try {
-    // UPDATED: 'us.openfoodfacts.org' to restrict to United States
-    const baseUrl = 'https://us.openfoodfacts.org/api/v2/search';
-    const params = new URLSearchParams({ 
-        search_terms: query, 
-        fields: 'code,product_name,brands,nutriments,serving_size', 
-        page_size: '20', 
-        json: 'true' 
-    });
-    
-    const response = await fetch(`${baseUrl}?${params.toString()}`);
-    if (!response.ok) return [];
-    
-    const data = await response.json();
-    return (data.products || []).map(item => ({
-        id: `off_${item.code}`,
-        name: item.product_name || 'Unknown',
-        brand: item.brands || 'OpenFoodFacts',
-        source: 'OFF',
-        calories: Math.round(item.nutriments?.['energy-kcal_100g'] || item.nutriments?.['energy-kcal'] || 0),
-        protein: Math.round(item.nutriments?.proteins_100g || item.nutriments?.proteins || 0),
-        fats: Math.round(item.nutriments?.fat_100g || item.nutriments?.fat || 0),
-        carbs: Math.round(item.nutriments?.carbohydrates_100g || item.nutriments?.carbohydrates || 0),
-        // Per-100g macros -> base label must be 100g (not the serving_size) so logged totals are correct.
-        weight_amount: "100g"
-    }));
-  } catch { return []; }
-};
-
-// --- 5. MAIN SEARCH ---
-export const searchAllFood = async (query) => {
-    console.log("🌐 searching USDA/OFF for:", query);
-    const [usda, off] = await Promise.all([searchUSDA(query), searchOpenFoodFacts(query)]);
-
-    let results = [...usda, ...off];
-    if (results.length > 0) saveToCache(results.slice(0, 1), query); 
-    return results;
-};
+// Kept for the recipe editor's database-search flow (same server search).
+export const searchUSDA = async (query) => callSearchFood({ mode: 'search', query });
 
 // --- 6. CALCULATIONS (Restored Exports) ---
 export const calculateTDEE = (weightLbs, heightCm, age, gender, activityLevel = 'moderate') => {

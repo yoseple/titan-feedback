@@ -17,14 +17,12 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
-    // --- Shared food-search cache. Any signed-in user may read. Writes are
-    // restricted to authenticated CREATES only (no overwrite/delete), which
-    // limits cache poisoning. Full lockdown (server-only writes via a search
-    // proxy) is the follow-up — see the Titan Improvement Roadmap.
+    // --- Shared food-search cache. Any signed-in user may read; writes happen
+    // ONLY server-side (the searchFood Cloud Function via the Admin SDK, which
+    // bypasses these rules), so clients cannot poison the shared cache.
     match /food_cache/{doc} {
       allow read: if signedIn();
-      allow create: if signedIn();
-      allow update, delete: if false;
+      allow write: if false;
     }
 
     // --- AI daily-quota counters. Written ONLY by the Cloud Function via the

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Loader, Wand2, X, Plus, Clock, Bookmark, ScanBarcode, Camera, Trash2, Flame } from 'lucide-react';
 import { Scanner } from '@yudiel/react-qr-scanner';
-import { searchAllFood, getSuggestions, searchByBarcode, searchAI, saveToCache } from '../../utils/nutrition'; 
+import { searchAllFood, getSuggestions, searchByBarcode, searchAI } from '../../utils/nutrition';
 import { generateContent } from '../../lib/ai';
 import { useTitanData } from '../../hooks/useTitanData';
 import { useToast } from '../Toast';
@@ -116,7 +116,6 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
           setIsWebSearching(false);
           
           if (product) {
-              saveToCache([product], product.name);
               onScanFood(product);
           } else {
               toast("Product not found in database.", 'error');
