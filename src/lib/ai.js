@@ -14,39 +14,32 @@ export const generateContent = async (prompt, type = 'chat') => {
 
   try {
     const result = await generateAI({ prompt, type });
-    let text = result.data;
 
-    // 1. Safety Check
+    // The function now returns { text, remaining }; tolerate the legacy raw-string shape too.
+    const payload = result.data;
+    let text = (payload && typeof payload === 'object') ? payload.text : payload;
     if (!text || typeof text !== 'string') return null;
 
-    // 2. The "Markdown Stripper" Fix
-    // Sometimes AI returns ```json ... ```. We must remove that wrapper.
-    text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    // Server forces application/json, but strip stray code fences defensively.
+    text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
 
-    // 3. Surgical Extraction: Find the JSON object inside the text
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
-
-    if (firstBrace !== -1 && lastBrace !== -1) {
-      // Grab everything between the first { and the last }
-      const jsonString = text.substring(firstBrace, lastBrace + 1);
-      try {
-        return JSON.parse(jsonString);
-      } catch (e) {
-        console.warn("JSON cleanup failed, trying raw text...");
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Last-resort: extract the outermost JSON object.
+      const first = text.indexOf('{');
+      const last = text.lastIndexOf('}');
+      if (first !== -1 && last !== -1) {
+        try { return JSON.parse(text.substring(first, last + 1)); } catch { /* fall through */ }
       }
+      console.warn("AI response was not valid JSON");
+      return null;
     }
-
-    // 4. Fallback: Try parsing the cleaned text directly
-    return JSON.parse(text);
-
   } catch (error) {
     console.error("Cloud AI Failed:", error);
-
     if (error.message && error.message.includes('resource-exhausted')) {
       throw new Error(`Daily ${type} limit reached.`);
     }
-
     return null;
   }
 };
