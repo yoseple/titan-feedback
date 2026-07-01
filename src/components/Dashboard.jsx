@@ -14,7 +14,7 @@ import { categorizeFood, searchUSDA, searchAI, computeMacroTargets } from '../ut
 import { getLocalDate } from '../utils/date';
 import {
   normalizeFoodData, getBaseGramWeight, convertQuantity,
-  basisFromItem, basisFromLog, computeAmountMacros, buildFoodLog,
+  basisFromItem, basisFromLog, computeAmountMacros, buildFoodLog, getPortions,
 } from '../domain/foodMath';
 
 // --- MODALS & COMPONENTS ---
@@ -700,6 +700,22 @@ Request: "${msg}"
               </div>
               
               <div className="p-6 space-y-6 overflow-y-auto">
+                  {/* Quick portion chips — accurate presets from the food's serving size */}
+                  <div className="flex flex-wrap gap-2">
+                      {getPortions(scannedResult).map((chip) => {
+                          const active = servingUnit === chip.unit && Number(numServings) === chip.quantity;
+                          return (
+                              <button
+                                  key={chip.label}
+                                  onClick={() => { setNumServings(chip.quantity); setServingUnit(chip.unit); }}
+                                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition active:scale-95 ${active ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-slate-900 border-slate-700 text-gray-300 hover:border-emerald-500/50'}`}
+                              >
+                                  {chip.label}
+                              </button>
+                          );
+                      })}
+                  </div>
+
                   {/* Amount & Unit Selector */}
                   <div className="flex items-center justify-between bg-slate-900 p-4 rounded-2xl border border-slate-700 shadow-inner">
                       <div className="flex flex-col">

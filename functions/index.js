@@ -162,6 +162,13 @@ function categorizeFoodServer(text) {
   return "Pantry";
 }
 
+// Grams from an OpenFoodFacts serving_size string like "45 g" / "30g (1 bar)" -> 45. Else null.
+function gramsFromServingSize(s) {
+  if (!s) return null;
+  const m = String(s).match(/(\d+(?:\.\d+)?)\s*g/i);
+  return m ? parseFloat(m[1]) : null;
+}
+
 async function searchUsdaServer(queryText, key) {
   const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(queryText)}&pageSize=20&dataType=Branded,Foundation,SR Legacy&api_key=${key}`;
   const res = await fetch(url);
@@ -182,14 +189,12 @@ async function searchUsdaServer(queryText, key) {
       if (kj && kj.value) return kj.value / 4.184;
       return 0;
     };
-    let servingLabel = "100g";
-    let ratio = 1;
+    // Canonical per-100g macros (FDC nutrient values are per 100 g) + serving size in grams
+    // as a portion hint, so the client can offer accurate "100 g" / "1 serving" chips.
+    let servingGrams = null;
     if (item.servingSize && item.servingSizeUnit) {
       const unit = item.servingSizeUnit.toLowerCase();
-      if (unit === "g" || unit === "ml") {
-        ratio = item.servingSize / 100;
-        servingLabel = `${item.servingSize} ${item.servingSizeUnit}`;
-      }
+      if (unit === "g" || unit === "ml") servingGrams = item.servingSize;
     }
     return {
       id: `usda_${item.fdcId}`,
@@ -197,11 +202,12 @@ async function searchUsdaServer(queryText, key) {
       brand: item.brandOwner || "Generic",
       source: "USDA",
       category: categorizeFoodServer(item.description),
-      weight_amount: servingLabel,
-      calories: Math.round((getEnergyKcal() || 0) * ratio),
-      protein: Math.round((getNut("203") || 0) * ratio),
-      fats: Math.round((getNut("204") || 0) * ratio),
-      carbs: Math.round((getNut("205") || 0) * ratio),
+      weight_amount: "100g",
+      servingGrams,
+      calories: Math.round(getEnergyKcal() || 0),
+      protein: Math.round(getNut("203") || 0),
+      fats: Math.round(getNut("204") || 0),
+      carbs: Math.round(getNut("205") || 0),
     };
   });
 }
@@ -228,6 +234,7 @@ async function searchOffServer(queryText) {
     fats: Math.round(item.nutriments?.fat_100g || item.nutriments?.fat || 0),
     carbs: Math.round(item.nutriments?.carbohydrates_100g || item.nutriments?.carbohydrates || 0),
     weight_amount: "100g",
+    servingGrams: gramsFromServingSize(item.serving_size),
   }));
 }
 
@@ -255,6 +262,7 @@ async function barcodeLookupServer(code) {
       carbs: Math.round(val("carbohydrates_100g", "carbohydrates", "carbohydrates_value")),
       fats: Math.round(val("fat_100g", "fat", "fat_value")),
       weight_amount: "100g",
+      servingGrams: gramsFromServingSize(p.serving_size),
     };
   }
   return null;

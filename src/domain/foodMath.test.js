@@ -10,6 +10,7 @@ import {
   buildFoodLog,
   displayAmount,
   convertQuantity,
+  getPortions,
 } from './foodMath';
 
 describe('parseGramsFromLabel', () => {
@@ -108,6 +109,21 @@ describe('basisFromItem — re-logging a stored item uses its immutable base', (
     const basis = basisFromItem({ calories: 200, protein: 0, carbs: 0, fats: 0, weight_amount: '100g' });
     expect(basis.gramScalable).toBe(true);
     expect(computeAmountMacros(basis, 100, 'g').calories).toBe(200);
+  });
+});
+
+describe('getPortions — accurate quick-add chips', () => {
+  it('gram food with a serving size offers an exact "1 serving (N g)" chip', () => {
+    const chips = getPortions({ weight_amount: '100g', servingGrams: 45 });
+    expect(chips[0]).toEqual({ label: '1 serving (45 g)', quantity: 45, unit: 'g' });
+    expect(chips.some((c) => c.label === '100 g')).toBe(true);
+    // and that chip logs the correct macros against a per-100g basis
+    const basis = basisFromSearchItem({ calories: 550, protein: 0, carbs: 0, fats: 0, weight_amount: '100g' });
+    expect(computeAmountMacros(basis, chips[0].quantity, chips[0].unit).calories).toBe(248); // 550 * 45/100
+  });
+  it('serving-only food offers serving chips', () => {
+    const chips = getPortions({ weight_amount: '1 serving', servingGrams: null });
+    expect(chips.map((c) => c.unit)).toEqual(['serving', 'serving']);
   });
 });
 

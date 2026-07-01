@@ -182,6 +182,25 @@ export const basisFromLog = (log) => {
   };
 };
 
+// Portion presets ("chips") for the log modal, derived from the item's base + servingGrams.
+// Each chip sets a { quantity, unit }. Gram-scalable foods get an accurate "1 serving (N g)"
+// chip when the source gives a serving size, plus 100 g / 1 oz; serving-only foods get servings.
+export const getPortions = (item) => {
+  const baseGrams = parseGramsFromLabel(item.weight_amount);
+  const sg = Number(item.servingGrams) || null;
+  if (!baseGrams) {
+    return [
+      { label: '1 serving', quantity: 1, unit: 'serving' },
+      { label: '2 servings', quantity: 2, unit: 'serving' },
+    ];
+  }
+  const chips = [];
+  if (sg) chips.push({ label: `1 serving (${Math.round(sg)} g)`, quantity: Math.round(sg), unit: 'g' });
+  chips.push({ label: '100 g', quantity: 100, unit: 'g' });
+  chips.push({ label: '1 oz', quantity: 1, unit: 'oz' });
+  return chips;
+};
+
 // Compute consumed macros for a basis + amount.
 export const computeAmountMacros = (basis, quantity, unit) => {
   if (!basis) return { calories: 0, protein: 0, carbs: 0, fats: 0 };
