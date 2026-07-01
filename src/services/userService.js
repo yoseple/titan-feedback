@@ -1,6 +1,6 @@
-import { db, app } from "../lib/firebase"; 
-import { getFunctions, httpsCallable } from "firebase/functions"; 
-import { 
+import { db } from "../lib/firebase";
+import { callWorker } from "../lib/workerClient";
+import {
   doc, 
   setDoc, 
   getDoc, 
@@ -61,12 +61,10 @@ export const getTodayLogs = async (uid) => {
 // --- TICKET SYSTEM ---
 export const submitSupportTicket = async (ticketData) => {
   const { subject, message, type } = ticketData;
-  const functions = getFunctions(app, "us-central1"); 
-  const submitTicket = httpsCallable(functions, 'submitTicket');
 
   try {
-    const result = await submitTicket({ subject, message, type });
-    return result.data;
+    // The worker returns { success, url, ticketId } DIRECTLY (no Firebase envelope).
+    return await callWorker('/ticket', { subject, message, type });
   } catch (error) {
     console.error("Ticket Submission Failed:", error);
     throw error;

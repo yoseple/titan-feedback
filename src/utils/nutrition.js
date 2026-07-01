@@ -1,6 +1,6 @@
-import { db, app } from "../lib/firebase";
+import { db } from "../lib/firebase";
 import { collection, query, limit, orderBy, getDocs } from "firebase/firestore";
-import { getFunctions, httpsCallable } from "firebase/functions";
+import { callWorker } from "../lib/workerClient";
 import { generateContent } from "../lib/ai";
 import { rankFoodResults } from "../domain/foodSearch";
 import { categorizeFood, calculateTDEE, calculateTargetCalories, computeMacroTargets } from "../domain/nutritionMath";
@@ -8,13 +8,13 @@ import { categorizeFood, calculateTDEE, calculateTargetCalories, computeMacroTar
 // Re-export the pure nutrition math so existing imports from '../utils/nutrition' keep working.
 export { categorizeFood, calculateTDEE, calculateTargetCalories, computeMacroTargets };
 
-// Food search runs server-side (the `searchFood` callable) so the USDA key stays
-// off the client and USDA/OpenFoodFacts results are normalized + cached in one place.
-const functions = getFunctions(app, "us-central1");
+// Food search runs server-side (the worker `/food` route) so the USDA key stays
+// off the client and USDA/OpenFoodFacts results are normalized in one place.
 const callSearchFood = async (payload) => {
   try {
-    const res = await httpsCallable(functions, 'searchFood')(payload);
-    return (res.data && res.data.results) || [];
+    // The worker returns { results } DIRECTLY (no Firebase envelope).
+    const res = await callWorker('/food', payload);
+    return (res && res.results) || [];
   } catch (e) {
     console.warn("Food search failed:", e);
     return [];

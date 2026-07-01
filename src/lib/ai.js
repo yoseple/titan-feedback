@@ -1,26 +1,19 @@
 // src/lib/ai.js
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "./firebase"; 
+import { callWorker } from "./workerClient";
 
-// Initialize Cloud Functions
-const functions = getFunctions(app, "us-central1");
-
-// Latest remaining daily quota the function reported, by type. The UI can read this
+// Latest remaining daily quota the worker reported, by type. The UI can read this
 // to show "N chats left" instead of only discovering the limit when it's hit.
 export const aiQuota = { chat: null, search: null };
 
 /**
- * Calls the 'generateAI' Cloud Function.
+ * Calls the worker '/ai' route.
  * Includes robust parsing to handle Markdown wrappers and conversational fluff.
  */
 export const generateContent = async (prompt, type = 'chat') => {
-  const generateAI = httpsCallable(functions, 'generateAI');
-
   try {
-    const result = await generateAI({ prompt, type });
-
-    // The function now returns { text, remaining }; tolerate the legacy raw-string shape too.
-    const payload = result.data;
+    // The worker returns the payload DIRECTLY as { text, remaining } (no Firebase envelope);
+    // tolerate the legacy raw-string shape too.
+    const payload = await callWorker('/ai', { prompt, type });
     if (payload && typeof payload === 'object' && typeof payload.remaining === 'number') {
       aiQuota[type] = payload.remaining;
     }
@@ -44,7 +37,7 @@ export const generateContent = async (prompt, type = 'chat') => {
     }
   } catch (error) {
     console.error("Cloud AI Failed:", error);
-    if (error.message && error.message.includes('resource-exhausted')) {
+    if (error.code === 'resource-exhausted' || (error.message && error.message.includes('resource-exhausted'))) {
       throw new Error(`Daily ${type} limit reached.`);
     }
     return null;

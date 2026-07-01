@@ -1,0 +1,17 @@
+name = "titan-api"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# KV namespace for quota accounting, ticket PII mapping, and cached signing certs.
+# Create it once, then paste the returned id below:
+#   wrangler kv namespace create TITAN_KV
+[[kv_namespaces]]
+binding = "TITAN_KV"
+id = "REPLACE_WITH_KV_ID"
+
+[vars]
+FIREBASE_PROJECT_ID = "titan-73b02"
+ALLOWED_ORIGINS = "https://titan-73b02.web.app,https://titan-73b02.firebaseapp.com,http://localhost:5173"
+
+# Secrets (NOT stored here — set via `wrangler secret put <NAME>`):
+#   GEMINI_API_KEY, USDA_API_KEY, GITHUB_TOKEN

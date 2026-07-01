@@ -1,0 +1,16 @@
+{
+  "name": "titan-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker replacing Titan's 3 Firebase callables (generateAI, searchFood, submitTicket) so the app runs card-free.",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8",
+    "wrangler": "^4.106.0"
+  }
+}
