@@ -1,4 +1,5 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
@@ -314,4 +315,35 @@ exports.searchFood = onCall({
   const results = [...usda, ...off];
   await cacheTopResult(results);
   return { results };
+});
+// --- 4. PER-DAY FOOD ROLLUP ----------------------------------------------
+// Maintains artifacts/{appId}/users/{uid}/daily_summaries/{date} with that day's
+// food totals, so dashboards / 30-day trends can read O(1) summary docs instead
+// of scanning the (capped) food_logs. Re-aggregates the affected day on each write.
+exports.aggregateDailyFood = onDocumentWritten({
+  document: "artifacts/{appId}/users/{uid}/food_logs/{logId}",
+  region: "us-central1",
+}, async (event) => {
+  const { appId, uid } = event.params;
+  const after = event.data && event.data.after && event.data.after.data();
+  const before = event.data && event.data.before && event.data.before.data();
+  const date = (after && after.date) || (before && before.date);
+  if (!date) return;
+  try {
+    const userRef = db.collection("artifacts").doc(appId).collection("users").doc(uid);
+    const snap = await userRef.collection("food_logs").where("date", "==", date).get();
+    const totals = { calories: 0, protein: 0, carbs: 0, fats: 0, count: 0 };
+    snap.forEach((d) => {
+      const f = d.data() || {};
+      totals.calories += f.calories || 0;
+      totals.protein += f.protein || 0;
+      totals.carbs += f.carbs || 0;
+      totals.fats += f.fats || 0;
+      totals.count += 1;
+    });
+    await userRef.collection("daily_summaries").doc(date)
+      .set({ ...totals, date, updatedAt: new Date().toISOString() }, { merge: true });
+  } catch (e) {
+    console.error("aggregateDailyFood failed", e);
+  }
 });
