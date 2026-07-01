@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveUserContext, formatUserContext, formatChatMemory } from './coach';
+import { deriveUserContext, formatUserContext, formatChatMemory, parseCoachAction, normalizeDayId } from './coach';
 
 describe('deriveUserContext', () => {
   it('summarizes goal, latest weight, trend, and today intake', () => {
@@ -29,6 +29,54 @@ describe('formatUserContext', () => {
     expect(s).toContain('goal=cut');
     expect(s).toContain('trend=-2lb/wk');
     expect(s).toContain('todaySoFar=500cal/40gP');
+  });
+});
+
+describe('normalizeDayId', () => {
+  it('normalizes day names + aliases', () => {
+    expect(normalizeDayId('Monday')).toBe('monday');
+    expect(normalizeDayId('WED')).toBe('wednesday');
+    expect(normalizeDayId('tues')).toBe('tuesday');
+    expect(normalizeDayId(null)).toBe(null);
+  });
+});
+
+describe('parseCoachAction — validates + bounds untrusted AI output', () => {
+  it('parses a valid update_plan and normalizes the day id', () => {
+    const a = parseCoachAction({ type: 'update_plan', updates: [{ day: 'Monday', focus: 'Chest', exercises: [{ name: 'Bench', sets: '4', reps: '8', type: 'weighted' }] }] });
+    expect(a.type).toBe('update_plan');
+    expect(a.updates[0].id).toBe('monday');
+    expect(a.updates[0].exercises.length).toBe(1);
+    expect(a.preview).toContain('Chest');
+  });
+  it('parses a valid add_meal and clamps macros', () => {
+    const a = parseCoachAction({ type: 'add_meal', data: { name: 'X', calories: 650, protein: 55, carbs: 45, fats: 22, ingredients: [{ name: 'Egg' }] } });
+    expect(a.type).toBe('add_meal');
+    expect(a.meal.calories).toBe(650);
+    expect(a.preview).toContain('650 cal');
+  });
+  it('falls back to advice for malformed / empty input', () => {
+    expect(parseCoachAction(null).type).toBe('advice');
+    expect(parseCoachAction({}).type).toBe('advice');
+    expect(parseCoachAction({ type: 'update_plan', updates: [] }).type).toBe('advice');
+    expect(parseCoachAction({ type: 'advice', message: 'hi' })).toEqual({ type: 'advice', message: 'hi' });
+  });
+  it('clamps absurd numbers and drops junk exercises', () => {
+    const a = parseCoachAction({ type: 'add_meal', data: { name: 'Y', calories: 9e9, protein: -50 } });
+    expect(a.meal.calories).toBe(10000); // clamped
+    expect(a.meal.protein).toBe(0);      // negatives floored
+    const p = parseCoachAction({ type: 'update_plan', updates: [{ day: 'Mon', exercises: [{ name: '' }, { name: 'Row', type: 'evil' }] }] });
+    expect(p.updates[0].exercises.length).toBe(1);        // nameless dropped
+    expect(p.updates[0].exercises[0].type).toBe('weighted'); // bad type -> default
+  });
+  it('caps array + string lengths (runaway output / injection)', () => {
+    const a = parseCoachAction({ type: 'update_plan', updates: Array.from({ length: 50 }, () => ({ day: 'monday', exercises: Array.from({ length: 99 }, (_, i) => ({ name: `e${i}` })) })) });
+    expect(a.updates.length).toBeLessThanOrEqual(7);
+    expect(a.updates[0].exercises.length).toBeLessThanOrEqual(12);
+    const m = parseCoachAction({ type: 'add_meal', data: { name: 'z'.repeat(500), instructions: 'i'.repeat(5000), ingredients: Array.from({ length: 99 }, () => ({ name: 'a' })) } });
+    expect(m.meal.name.length).toBeLessThanOrEqual(80);
+    expect(m.meal.instructions.length).toBeLessThanOrEqual(2000);
+    expect(m.meal.ingredients.length).toBeLessThanOrEqual(30);
   });
 });
 

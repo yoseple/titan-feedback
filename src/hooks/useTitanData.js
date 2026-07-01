@@ -75,9 +75,10 @@ export const useTitanData = () => {
     deleteFood: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id)); },
     
     saveRecipe: async (mealData) => {
-        if(!user) return;
-        if (mealData.id) { const { id, ...rest } = mealData; await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id), rest); } 
-        else { await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'custom_meals'), mealData); }
+        if(!user) return null;
+        if (mealData.id) { const { id, ...rest } = mealData; await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id), rest); return id; }
+        const ref = await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'custom_meals'), mealData);
+        return ref.id; // returned so the AI "add meal" flow can offer undo
     },
     deleteRecipe: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_meals', id)); },
     

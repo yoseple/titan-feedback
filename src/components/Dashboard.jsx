@@ -14,7 +14,7 @@ import { categorizeFood, searchUSDA, searchAI, computeMacroTargets } from '../ut
 import { getLocalDate } from '../utils/date';
 import { normalizeFoodData, getBaseGramWeight, convertQuantity, getPortions } from '../domain/foodMath';
 import { useFoodLogging } from '../hooks/useFoodLogging';
-import { deriveUserContext, formatUserContext, formatChatMemory } from '../domain/coach';
+import { deriveUserContext, formatUserContext, formatChatMemory, parseCoachAction } from '../domain/coach';
 
 // --- MODALS & COMPONENTS ---
 import Onboarding from './modals/Onboarding'; 
@@ -36,22 +36,6 @@ const MEAL_SECTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 
 // Food math (parsing, unit conversion, normalization, and the immutable-basis model)
 // now lives in ../domain/foodMath (pure + unit-tested). Imported above.
-
-// Helper to normalize day IDs
-const normalizeId = (input) => {
-    if (!input) return null;
-    const lower = input.toLowerCase().trim();
-    if (["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].includes(lower)) {
-        return lower;
-    }
-    const map = {
-        "mon": "monday", "tue": "tuesday", "tues": "tuesday", 
-        "wed": "wednesday", "weds": "wednesday", 
-        "thu": "thursday", "thur": "thursday", "thurs": "thursday",
-        "fri": "friday", "sat": "saturday", "sun": "sunday"
-    };
-    return map[lower] || lower; 
-};
 
 // --- MAIN COMPONENT ---
 
@@ -94,6 +78,8 @@ const Dashboard = () => {
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const [chatQuota, setChatQuota] = useState(null);
   const [weightInput, setWeightInput] = useState('');
+  const [pendingAction, setPendingAction] = useState(null); // AI action awaiting Apply/Discard
+  const [lastUndo, setLastUndo] = useState(null);
   const chatEndRef = useRef(null);
 
   useEffect(() => { 
@@ -290,40 +276,76 @@ Request: "${msg}"
         if (aiQuota.chat != null) setChatQuota(aiQuota.chat);
 
         if (!data) throw new Error("No data returned");
-        
-        if (data.type === 'update_plan') {
-             const updates = data.updates || [];
 
-             for (const u of updates) {
-                const targetId = normalizeId(u.id || u.day);
-                if (targetId) {
-                    await actions.updateWorkoutPlan(targetId, {
-                        ...u,
-                        id: targetId,
-                        day: u.day || targetId.charAt(0).toUpperCase() + targetId.slice(1),
-                        exercises: Array.isArray(u.exercises) ? u.exercises : []
-                    });
-                }
-             }
-             setChatHistory(p => [...p, { role: 'ai', content: "I've updated your Workout Plan. Swapping tabs now..." }]);
-             setTimeout(() => setActiveTab('workouts'), 1500);
-        }
-        else if (data.type === 'add_meal') { 
-             const cleanMeal = normalizeFoodData(data.data);
-             await actions.saveRecipe(cleanMeal); 
-             setChatHistory(p => [...p, { role: 'ai', content: `👨‍🍳 Added "${cleanMeal.name}" to your diet plan. Taking you there...` }]);
-             setTimeout(() => setActiveTab('diet'), 1500);
-        }
-        else {
-             setChatHistory(p => [...p, { role: 'ai', content: data.message || "Done." }]);
+        // Validate + normalize the AI output, then REQUIRE confirmation before writing
+        // anything (no more destructive auto-apply).
+        const action = parseCoachAction(data);
+        if (action.type === 'advice') {
+             setChatHistory(p => [...p, { role: 'ai', content: action.message }]);
+        } else {
+             setPendingAction(action);
+             setChatHistory(p => [...p, { role: 'ai', content: `${action.type === 'update_plan' ? "Here's a workout plan update — review and Apply below:" : "Here's a meal — review and Apply below:"}\n${action.preview}` }]);
         }
 
     } catch (err) {
         console.error("Chat Error:", err);
         setChatHistory(p => [...p, { role: 'ai', content: "Error connecting to AI." }]);
     }
-    
+
     setIsChatProcessing(false);
+  };
+
+  // Apply the AI's proposed change only on explicit confirmation, capturing enough to undo it.
+  const applyPendingAction = async () => {
+      const action = pendingAction;
+      if (!action) return;
+      setPendingAction(null);
+      try {
+          if (action.type === 'update_plan') {
+              const prevDays = action.updates
+                  .map(u => workouts.find(w => w.id === u.id || (w.day || '').toLowerCase() === u.id))
+                  .filter(Boolean)
+                  .map(w => ({ ...w }));
+              for (const u of action.updates) {
+                  await actions.updateWorkoutPlan(u.id, {
+                      ...u,
+                      id: u.id,
+                      day: u.day || (u.id.charAt(0).toUpperCase() + u.id.slice(1)),
+                      exercises: u.exercises,
+                  });
+              }
+              setLastUndo({ type: 'plan', label: 'workout plan', prevDays });
+              setChatHistory(p => [...p, { role: 'ai', content: "✅ Applied to your Workout Plan." }]);
+              setTimeout(() => setActiveTab('workouts'), 800);
+          } else if (action.type === 'add_meal') {
+              const cleanMeal = normalizeFoodData(action.meal);
+              const id = await actions.saveRecipe(cleanMeal);
+              setLastUndo(id ? { type: 'meal', label: cleanMeal.name, id } : null);
+              setChatHistory(p => [...p, { role: 'ai', content: `✅ Added "${cleanMeal.name}" to your meals.` }]);
+              setTimeout(() => setActiveTab('diet'), 800);
+          }
+      } catch (e) {
+          console.error('Apply failed', e);
+          setChatHistory(p => [...p, { role: 'ai', content: "Couldn't apply that — please try again." }]);
+      }
+  };
+
+  const discardPendingAction = () => {
+      setPendingAction(null);
+      setChatHistory(p => [...p, { role: 'ai', content: "Discarded. Tell me what to change." }]);
+  };
+
+  const undoLastChange = async () => {
+      const u = lastUndo;
+      if (!u) return;
+      setLastUndo(null);
+      try {
+          if (u.type === 'plan') { for (const d of u.prevDays) await actions.updateWorkoutPlan(d.id, d); }
+          else if (u.type === 'meal') { await actions.deleteRecipe(u.id); }
+          setChatHistory(p => [...p, { role: 'ai', content: "↩️ Reverted the last change." }]);
+      } catch (e) {
+          console.error('Undo failed', e);
+      }
   };
 
   // --- RENDER HELPERS ---
@@ -601,6 +623,27 @@ Request: "${msg}"
                     )}
                     <div ref={chatEndRef}/>
                 </div>
+
+                {/* PENDING AI ACTION — nothing is written until the user taps Apply */}
+                {pendingAction && (
+                    <div className="mx-3 mb-2 p-3 bg-slate-800 border border-blue-500/40 rounded-xl animate-in fade-in">
+                        <div className="text-[10px] font-bold text-blue-300 uppercase tracking-widest mb-1">{pendingAction.type === 'update_plan' ? 'Proposed plan update' : 'Proposed meal'}</div>
+                        <pre className="text-xs text-gray-300 whitespace-pre-wrap font-sans mb-2 leading-relaxed">{pendingAction.preview}</pre>
+                        <div className="flex gap-2">
+                            <button onClick={applyPendingAction} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-bold text-white active:scale-95 transition">Apply</button>
+                            <button onClick={discardPendingAction} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-bold text-gray-300 active:scale-95 transition">Discard</button>
+                        </div>
+                    </div>
+                )}
+
+                {/* UNDO the last applied change */}
+                {lastUndo && !pendingAction && (
+                    <div className="mx-3 mb-2 flex items-center justify-between bg-slate-800/70 border border-gray-700 rounded-xl px-3 py-2 animate-in fade-in">
+                        <span className="text-xs text-gray-400 truncate pr-2">Applied a change to your {lastUndo.label}.</span>
+                        <button onClick={undoLastChange} className="text-xs font-bold text-blue-400 hover:text-blue-300 uppercase tracking-wide shrink-0">↩︎ Undo</button>
+                    </div>
+                )}
+
                 <form onSubmit={handleChatSubmit} className="p-3 bg-gray-900 border-t border-gray-700 flex gap-2 pb-safe-bottom">
                     <input 
                         value={chatInput} 
