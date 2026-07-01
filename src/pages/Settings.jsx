@@ -50,7 +50,13 @@ export default function Settings({ onClose }) {
     try {
       const ftVal = parseInt(feet || 0);
       const inVal = parseInt(inches || 0);
-      
+      const weightVal = parseFloat(formData.weight);
+      const ageVal = parseInt(formData.age);
+
+      // Validate before computing TDEE — otherwise blank weight/age silently fall back
+      // to hidden defaults (180 lb / 25 y) and a wrong calorie target gets persisted (B14).
+      if (!weightVal || weightVal <= 0) { toast("Please enter your weight.", 'error'); return; }
+      if (!ageVal || ageVal <= 0) { toast("Please enter your age.", 'error'); return; }
       if (ftVal === 0 && inVal === 0) {
           toast("Please enter a valid height.", 'error');
           return;
