@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['favicon-32.png', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
         name: 'Titan Fitness Coach',
         short_name: 'Titan',
