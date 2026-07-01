@@ -4,7 +4,8 @@ import {
 } from './foodMath';
 import { computeMacroTargets, calculateTargetCalories } from './nutritionMath';
 import { rankFoodResults } from './foodSearch';
-import { deriveUserContext } from './coach';
+import { deriveUserContext, parseCoachAction } from './coach';
+import { weeklyCalories } from './trends';
 import { getLocalDate } from '../utils/date';
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,25 @@ describe('STRESS — expected vs actual (representative scenarios)', () => {
     }
     // 12. Local date format
     scenario('getLocalDate format', true, /^\d{4}-\d{2}-\d{2}$/.test(getLocalDate(new Date('2026-06-30T12:00:00'))));
+    // 13. Re-edit a serving log 5× (deeper) — still 400
+    {
+      const b = basisFromSearchItem({ calories: 200, weight_amount: '100g' });
+      let log = buildFoodLog(b, 2, 'serving', { name: 'x' });
+      for (let i = 0; i < 5; i++) { const bb = basisFromLog(log); log = buildFoodLog(bb, bb.quantity, bb.unit, { name: 'x' }); }
+      scenario('Re-edit serving log x5 (no drift)', 400, log.calories);
+    }
+    // 14. Coach safety: absurd calories clamped to 10000
+    scenario('AI meal 9e9 cal clamped', 10000, parseCoachAction({ type: 'add_meal', data: { calories: 9e9 } }).meal.calories);
+    // 15. Coach safety: 99 exercises capped at <=12
+    {
+      const a = parseCoachAction({ type: 'update_plan', updates: [{ day: 'monday', exercises: Array.from({ length: 99 }, (_, i) => ({ name: `e${i}` })) }] });
+      scenario('AI 99 exercises capped <=12', true, a.updates[0].exercises.length <= 12);
+    }
+    // 16. Weekly trend sums today's two logs
+    {
+      const w = weeklyCalories([{ date: '2026-07-01', calories: 500 }, { date: '2026-07-01', calories: 300 }], '2026-07-01');
+      scenario('Weekly trend sums today', 800, w[6].calories);
+    }
 
     // Print the table
     const pass = rows.filter((r) => r.result === 'PASS').length;
@@ -108,9 +128,9 @@ const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (arr) => arr[rnd(arr.length)];
 
 describe('STRESS — fuzz invariants', () => {
-  it('1000 random log→edit×3 round-trips stay stable, never NaN/negative', () => {
+  it('2500 random log→edit×3 round-trips stay stable, never NaN/negative', () => {
     let drift = 0, bad = 0;
-    for (let iter = 0; iter < 1000; iter++) {
+    for (let iter = 0; iter < 2500; iter++) {
       const item = {
         name: `f${iter}`,
         calories: rnd(900) + 1, protein: rnd(80), carbs: rnd(120), fats: rnd(60),
