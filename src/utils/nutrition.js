@@ -2,6 +2,11 @@ import { db, app } from "../lib/firebase";
 import { collection, query, limit, orderBy, getDocs } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { generateContent } from "../lib/ai";
+import { rankFoodResults } from "../domain/foodSearch";
+import { categorizeFood, calculateTDEE, calculateTargetCalories, computeMacroTargets } from "../domain/nutritionMath";
+
+// Re-export the pure nutrition math so existing imports from '../utils/nutrition' keep working.
+export { categorizeFood, calculateTDEE, calculateTargetCalories, computeMacroTargets };
 
 // Food search runs server-side (the `searchFood` callable) so the USDA key stays
 // off the client and USDA/OpenFoodFacts results are normalized + cached in one place.
@@ -19,16 +24,6 @@ const callSearchFood = async (payload) => {
 const cleanText = (str) => {
   if (!str) return '';
   return str.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-};
-
-export const categorizeFood = (text) => {
-  const t = (text || '').toLowerCase();
-  if (t.match(/beef|chicken|turkey|pork|fish|salmon|tuna|egg|tofu|steak|whey|meat|sausage|bacon|burger|shrimp|protein/)) return 'Proteins';
-  if (t.match(/spinach|kale|lettuce|apple|banana|berry|vegetable|fruit|onion|tomato|produce|potato|avocado|cucumber|pepper/)) return 'Produce';
-  if (t.match(/milk|yogurt|cheese|butter|cream/)) return 'Dairy';
-  if (t.match(/rice|pasta|bread|oat|grain|flour|noodle|bagel|bun|wrap|tortilla/)) return 'Carbs';
-  if (t.match(/chip|cracker|cookie|bar|snack|chocolate/)) return 'Snacks';
-  return 'Pantry'; 
 };
 
 // --- 1. INSTANT SUGGESTIONS (Local Cache) ---
@@ -96,38 +91,7 @@ export const searchAI = async (query) => {
 // --- 4. EXTERNAL FOOD SEARCH (server-proxied USDA + OpenFoodFacts) ---
 // The USDA key, fetching, and kcal/per-100g normalization now live in the
 // `searchFood` Cloud Function. These are thin callable wrappers.
-export const searchAllFood = async (query) => callSearchFood({ mode: 'search', query });
+export const searchAllFood = async (query) => rankFoodResults(await callSearchFood({ mode: 'search', query }), query);
 
 // Kept for the recipe editor's database-search flow (same server search).
-export const searchUSDA = async (query) => callSearchFood({ mode: 'search', query });
-
-// --- 6. CALCULATIONS (Restored Exports) ---
-export const calculateTDEE = (weightLbs, heightCm, age, gender, activityLevel = 'moderate') => {
-    const weightKg = (parseFloat(weightLbs) || 180) * 0.45359237; 
-    const height = parseFloat(heightCm) || 175; 
-    const ageVal = parseFloat(age) || 25;
-    let bmr = (10 * weightKg) + (6.25 * height) - (5 * ageVal);
-    if (gender === 'female') bmr -= 161; else bmr += 5;
-    const multipliers = { sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, extreme: 1.9 };
-    return Math.round(bmr * (multipliers[activityLevel] || 1.375)); 
-};
-
-export const calculateTargetCalories = (tdee, goal) => {
-    let target = tdee;
-    if (goal === 'cut') { target = tdee * 0.80; if (target < 1200) target = 1200; }
-    else if (goal === 'bulk') { target = tdee * 1.10; }
-    return Math.round(target);
-};
-
-// Single source of truth for macro goals. Protein/fat scale with bodyweight;
-// carbs fill the remaining calories; fiber ~14g per 1000 kcal. Replaces the
-// hardcoded 250/80 (Dashboard) and divergent 150/200/60 (CalorieDashboard).
-export const computeMacroTargets = (caloriesTarget, goal = 'maintenance', weightLbs = 180) => {
-    const cals = parseFloat(caloriesTarget) || 2000;
-    const w = parseFloat(weightLbs) || 180;
-    const protein = Math.round(w * (goal === 'cut' ? 1.0 : 0.8)); // g/lb
-    const fats = Math.round(w * 0.35);                            // g/lb
-    const carbs = Math.max(0, Math.round((cals - (protein * 4) - (fats * 9)) / 4));
-    const fiber = Math.round((cals / 1000) * 14);
-    return { protein, carbs, fats, fiber };
-};
+export const searchUSDA = async (query) => rankFoodResults(await callSearchFood({ mode: 'search', query }), query);
