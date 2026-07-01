@@ -24,6 +24,7 @@ import ChefMode from './modals/ChefMode';
 import AddFoodModal from './modals/AddFoodModal'; 
 import ConsistencyHeatmap from './charts/ConsistencyHeatmap';
 import CalorieDashboard from './charts/CalorieDashboard';
+import WeightChart from './charts/WeightChart';
 import ExerciseCard from './cards/ExerciseCard';
 import MealCard from './cards/MealCard';
 
@@ -92,6 +93,7 @@ const Dashboard = () => {
   const [chatHistory, setChatHistory] = useState([{ role: 'ai', content: "I am Titan. I can update your workout plans and create meals for you." }]);
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const [chatQuota, setChatQuota] = useState(null);
+  const [weightInput, setWeightInput] = useState('');
   const chatEndRef = useRef(null);
 
   useEffect(() => { 
@@ -506,6 +508,31 @@ Request: "${msg}"
           {activeTab === 'tracker' && (
             <div className="space-y-6 animate-in fade-in duration-300 pb-safe-bottom">
                <ConsistencyHeatmap workoutLogs={workoutLogs} foodLogs={foodLog} />
+
+               {/* --- BODYWEIGHT / PROGRESS --- */}
+               <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 shadow-lg">
+                   <div className="flex justify-between items-center mb-3">
+                       <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Scale className="w-4 h-4"/> Bodyweight</h4>
+                       <span className="text-sm text-gray-300 font-mono">{weightLog[0]?.weight ? `${weightLog[0].weight} lb` : '—'}</span>
+                   </div>
+                   <WeightChart data={weightLog} showDates />
+                   <div className="flex gap-2">
+                       <input
+                           type="number" inputMode="decimal" value={weightInput}
+                           onChange={e => setWeightInput(e.target.value)}
+                           placeholder={`Log weight for ${formattedDate}`}
+                           className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500 transition"
+                       />
+                       <button
+                           onClick={() => { const w = parseFloat(weightInput); if (w > 0) { actions.saveWeight(w, formattedDate); setWeightInput(''); } }}
+                           disabled={!(parseFloat(weightInput) > 0)}
+                           className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-5 rounded-xl font-bold active:scale-95 transition"
+                       >
+                           Log
+                       </button>
+                   </div>
+               </div>
+
                <CalorieDashboard
                  consumed={calsConsumed}
                  goal={tdee}
