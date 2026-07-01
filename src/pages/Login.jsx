@@ -13,7 +13,8 @@ export default function Login() {
   // This ensures we only redirect when Firebase has firmly established the session.
   useEffect(() => {
     if (currentUser) {
-      navigate('/');
+      // replace so the login page isn't left in history (Back would bounce right back).
+      navigate('/', { replace: true });
     }
   }, [currentUser, navigate]);
 
@@ -31,8 +32,12 @@ export default function Login() {
       
     } catch (err) {
       console.error(err);
-      setError('Failed to sign in with Google.');
       setLoading(false);
+      // User dismissed the popup themselves — not an error worth showing.
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') return;
+      if (err?.code === 'auth/popup-blocked') setError('Popup blocked — allow popups for this site and try again.');
+      else if (err?.code === 'auth/network-request-failed') setError('Network error — check your connection and try again.');
+      else setError('Could not sign in with Google. Please try again.');
     }
   }
 

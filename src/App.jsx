@@ -10,7 +10,7 @@ import Settings from './pages/Settings';
 // SECURITY GUARD: Forces login if no user is found
 const PrivateRoute = ({ children }) => {
   const { currentUser } = useAuth();
-  return currentUser ? children : <Navigate to="/login" />;
+  return currentUser ? children : <Navigate to="/login" replace />;
 };
 
 function App() {
