@@ -66,6 +66,12 @@ export const useTitanData = () => {
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), { ...foodData, date: dateStr, mealType, timestamp: serverTimestamp() });
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_history'), { ...foodData, lastUsed: serverTimestamp() });
     },
+    updateFood: async (id, foodData, dateStr, mealType) => {
+        if(!user) return;
+        // In-place edit of an existing log — avoids the delete+re-add churn AND the extra
+        // food_history duplicate the old edit path piled up on every edit (B20).
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id), { ...foodData, date: dateStr, mealType });
+    },
     deleteFood: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id)); },
     
     saveRecipe: async (mealData) => {

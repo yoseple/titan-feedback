@@ -251,18 +251,26 @@ const Dashboard = () => {
           finalLabel = `${numServings} ${servingUnit}`;
       }
 
-      if (scannedResult.id && !scannedResult.id.toString().startsWith('usda') && !scannedResult.id.toString().startsWith('off') && !scannedResult.id.toString().startsWith('ai_')) {
-          actions.deleteFood(scannedResult.id); 
-      }
-      
-      actions.saveFood({
+      const payload = {
          name: scannedResult.name || 'Unknown Food',
-         calories: calculationData.c, 
-         protein: calculationData.p, 
-         carbs: calculationData.ca, 
-         fats: calculationData.f,    
-         weight_amount: finalLabel 
-      }, getLocalDate(viewDate), addingToMeal || scannedResult.mealType);
+         calories: calculationData.c,
+         protein: calculationData.p,
+         carbs: calculationData.ca,
+         fats: calculationData.f,
+         weight_amount: finalLabel
+      };
+      const dateStr = getLocalDate(viewDate);
+      const mealType = addingToMeal || scannedResult.mealType;
+      // An existing (internal-id) log is edited in place; external results (usda/off/ai_) are new logs.
+      const isExistingLog = scannedResult.id
+          && !scannedResult.id.toString().startsWith('usda')
+          && !scannedResult.id.toString().startsWith('off')
+          && !scannedResult.id.toString().startsWith('ai_');
+      if (isExistingLog) {
+          actions.updateFood(scannedResult.id, payload, dateStr, mealType);
+      } else {
+          actions.saveFood(payload, dateStr, mealType);
+      }
       
       setScannedResult(null);
       setAddingToMeal(null);
@@ -582,7 +590,7 @@ Request: "${msg}"
   const carbsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.carbs || 0), 0);
   const fatsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.fats || 0), 0);
 
-  if (authLoading) return <div className="h-screen flex items-center justify-center bg-gray-900 text-white"><Loader className="animate-spin w-10 h-10 text-blue-500"/></div>;
+  if (authLoading || (user && userProfile === undefined)) return <div className="h-screen flex items-center justify-center bg-gray-900 text-white"><Loader className="animate-spin w-10 h-10 text-blue-500"/></div>;
   if (!user) return null;
   if (user && userProfile === null) return <Onboarding onComplete={handleOnboardingComplete} />;
 
@@ -609,12 +617,12 @@ Request: "${msg}"
       {/* DATE NAVIGATION */}
       <div className="bg-gray-900 border-b border-gray-800 py-2 shrink-0 z-10 shadow-lg">
         <div className="max-w-5xl mx-auto px-4 flex justify-between items-center">
-          <button onClick={() => setViewDate(new Date(viewDate.setDate(viewDate.getDate() - 1)))} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronLeft className="w-6 h-6"/></button>
+          <button onClick={() => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; })} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronLeft className="w-6 h-6"/></button>
           <div className="text-center">
             <div className="font-bold text-white text-lg">{formattedDate === getLocalDate(new Date()) ? "TODAY" : viewDate.toLocaleDateString('en-US', { weekday: 'long' })}</div>
             <div className="text-xs text-gray-500 font-mono tracking-widest">{formattedDate}</div>
           </div>
-          <button onClick={() => setViewDate(new Date(viewDate.setDate(viewDate.getDate() + 1)))} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronRight className="w-6 h-6"/></button>
+          <button onClick={() => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; })} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronRight className="w-6 h-6"/></button>
         </div>
       </div>
 
@@ -678,7 +686,7 @@ Request: "${msg}"
                
                <div className="grid md:grid-cols-2 gap-4">
                    {allMeals.map((meal, i) => (
-                       <MealCard key={i} meal={meal} isSelected={selectedMealIds.includes(meal.id)} onToggle={() => setSelectedMealIds(p => p.includes(meal.id) ? p.filter(x=>x!==meal.id) : [...p, meal.id])} onChefMode={setChefMeal} onEdit={setEditingMeal} onDelete={actions.deleteRecipe} />
+                       <MealCard key={meal.id || i} meal={meal} isSelected={selectedMealIds.includes(meal.id)} onToggle={() => setSelectedMealIds(p => p.includes(meal.id) ? p.filter(x=>x!==meal.id) : [...p, meal.id])} onChefMode={setChefMeal} onEdit={setEditingMeal} onDelete={actions.deleteRecipe} />
                    ))}
                </div>
                

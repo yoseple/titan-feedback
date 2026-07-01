@@ -9,7 +9,7 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
 
   useEffect(() => {
     if (!history) return;
-    const todaysLogs = history.filter(h => h.exercise === ex.name && h.date === date).sort((a,b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
+    const todaysLogs = history.filter(h => h.exercise === ex.name && h.date === date).sort((a,b) => (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0));
     setSetsData(prev => {
        const next = Array.from({ length: numSets }, () => ({ weight: '', reps: '', duration: '', distance: '', completed: false, logId: null }));
        for(let i=0; i<numSets; i++) {
