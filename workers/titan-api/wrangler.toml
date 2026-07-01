@@ -7,7 +7,7 @@ compatibility_date = "2025-06-01"
 #   wrangler kv namespace create TITAN_KV
 [[kv_namespaces]]
 binding = "TITAN_KV"
-id = "REPLACE_WITH_KV_ID"
+id = "f6bd14058dc74812b8e3a768c1be2c4d"
 
 [vars]
 FIREBASE_PROJECT_ID = "titan-73b02"
