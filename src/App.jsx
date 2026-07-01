@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 import Login from './pages/Login';
 import Dashboard from './components/Dashboard';
 import Settings from './pages/Settings';
@@ -15,6 +16,7 @@ const PrivateRoute = ({ children }) => {
 function App() {
   return (
     <ErrorBoundary>
+    <ToastProvider>
     <Router>
       <AuthProvider>
         <Routes>
@@ -42,6 +44,7 @@ function App() {
         </Routes>
       </AuthProvider>
     </Router>
+    </ToastProvider>
     </ErrorBoundary>
   );
 }

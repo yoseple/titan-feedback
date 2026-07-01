@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserProfile, updateUserProfile, submitSupportTicket } from '../services/userService';
 import { calculateTDEE, calculateTargetCalories, computeMacroTargets } from '../utils/nutrition';
+import { useToast } from '../components/Toast';
 import { MessageSquare, Send, Loader, X, LogOut, Github } from 'lucide-react'; // Added Github icon
 
 export default function Settings({ onClose }) {
   const { currentUser, logout } = useAuth();
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   
   // --- PROFILE STATE ---
@@ -50,7 +52,7 @@ export default function Settings({ onClose }) {
       const inVal = parseInt(inches || 0);
       
       if (ftVal === 0 && inVal === 0) {
-          alert("Please enter a valid height.");
+          toast("Please enter a valid height.", 'error');
           return;
       }
 
@@ -69,17 +71,17 @@ export default function Settings({ onClose }) {
       };
 
       await updateUserProfile(currentUser.uid, payload);
-      alert(`Profile Updated!\nTarget: ${target} kcal`);
+      toast(`Profile updated — target ${target} kcal`, 'success');
       if(onClose) onClose();
     } catch (e) {
       console.error(e);
-      alert('Error saving profile');
+      toast('Error saving profile', 'error');
     }
   };
 
   // Ticket Handler
   const handleTicketSubmit = async () => {
-    if(!ticket.message || !ticket.subject) return alert("Please fill in all fields.");
+    if(!ticket.message || !ticket.subject) return toast("Please fill in all fields.", 'error');
     
     setSendingTicket(true);
     try {
@@ -87,15 +89,15 @@ export default function Settings({ onClose }) {
       
       // Check if we got a GitHub URL back
       if (response && response.url) {
-        alert("Ticket Created Successfully! (Added to GitHub)");
+        toast("Ticket created — thanks for the report!", 'success');
       } else {
-        alert("Ticket Received!");
+        toast("Ticket received — thanks!", 'success');
       }
-      
-      setTicket({ ...ticket, subject: '', message: '' }); 
+
+      setTicket({ ...ticket, subject: '', message: '' });
     } catch (err) {
       console.error(err);
-      alert("Failed to send ticket. Please try again.");
+      toast("Failed to send ticket. Please try again.", 'error');
     } finally {
       setSendingTicket(false);
     }

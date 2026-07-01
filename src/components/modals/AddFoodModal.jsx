@@ -4,6 +4,7 @@ import { Scanner } from '@yudiel/react-qr-scanner';
 import { searchAllFood, getSuggestions, searchByBarcode, searchAI, saveToCache } from '../../utils/nutrition'; 
 import { generateContent } from '../../lib/ai';
 import { useTitanData } from '../../hooks/useTitanData';
+import { useToast } from '../Toast';
 
 // Debounce Helper
 const useDebounce = (value, delay) => {
@@ -48,6 +49,7 @@ const FoodItem = ({ food, onClick, type, onDelete }) => (
 
 const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistory, savedMeals = [] }) => {
   const { foodHistory } = useTitanData();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('search');
   const [query, setQuery] = useState('');
   
@@ -117,7 +119,7 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
               saveToCache([product], product.name);
               onScanFood(product);
           } else {
-              alert("Product not found in database.");
+              toast("Product not found in database.", 'error');
           }
       }
   };
