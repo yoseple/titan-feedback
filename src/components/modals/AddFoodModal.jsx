@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Loader, Wand2, X, Plus, Clock, Bookmark, ScanBarcode, Camera, Trash2 } from 'lucide-react';
+import { Search, Loader, Wand2, X, Plus, Clock, Bookmark, ScanBarcode, Camera, Trash2, Flame } from 'lucide-react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { searchAllFood, getSuggestions, searchByBarcode, searchAI, saveToCache } from '../../utils/nutrition'; 
 import { generateContent } from '../../lib/ai';
