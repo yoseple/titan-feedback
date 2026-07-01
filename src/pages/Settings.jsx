@@ -16,6 +16,7 @@ export default function Settings({ onClose }) {
   });
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
+  const [macros, setMacros] = useState(null); // editable daily P/C/F targets
 
   // --- TICKET STATE ---
   const [ticket, setTicket] = useState({ subject: '', message: '', type: 'feedback' });
@@ -34,6 +35,8 @@ export default function Settings({ onClose }) {
               setFeet(Math.floor(totalInches / 12));
               setInches(Math.round(totalInches % 12));
            }
+           if (data.macroTargets) setMacros(data.macroTargets);
+           else if (data.caloriesTarget) setMacros(computeMacroTargets(data.caloriesTarget, data.goal, data.weight));
         }
       } catch (e) {
         // Don't hang on the loading spinner forever if the profile read fails (B13).
@@ -44,6 +47,13 @@ export default function Settings({ onClose }) {
     }
     loadData();
   }, [currentUser]);
+
+  // Recommended macros from the current form values (bodyweight/goal driven).
+  const recommendedMacros = () => {
+    const heightCm = Math.round((parseInt(feet || 0) * 30.48) + (parseInt(inches || 0) * 2.54));
+    const tdee = calculateTDEE(formData.weight, heightCm, formData.age, formData.gender, formData.activityLevel);
+    return computeMacroTargets(calculateTargetCalories(tdee, formData.goal), formData.goal, formData.weight);
+  };
 
   // Profile Handler
   const handleSave = async () => {
@@ -65,7 +75,11 @@ export default function Settings({ onClose }) {
       const heightCm = Math.round((ftVal * 30.48) + (inVal * 2.54));
       const tdee = calculateTDEE(formData.weight, heightCm, formData.age, formData.gender, formData.activityLevel);
       const target = calculateTargetCalories(tdee, formData.goal);
-      const macroTargets = computeMacroTargets(target, formData.goal, formData.weight);
+      const recommended = computeMacroTargets(target, formData.goal, formData.weight);
+      // Honor manual macro edits; fall back to recommended for any blank field.
+      const macroTargets = macros
+        ? { protein: Number(macros.protein) || recommended.protein, carbs: Number(macros.carbs) || recommended.carbs, fats: Number(macros.fats) || recommended.fats, fiber: recommended.fiber }
+        : recommended;
 
       const payload = {
           ...formData,
@@ -187,6 +201,23 @@ export default function Settings({ onClose }) {
                     <option value="maintenance">Maintenance</option>
                     <option value="bulk">Bulk (Muscle Gain)</option>
                 </select>
+            </div>
+
+            {/* --- NUTRITION TARGETS (editable) --- */}
+            <div className="pt-1">
+                <div className="flex justify-between items-center mb-2">
+                    <label className="block text-xs font-bold text-gray-400 uppercase">Daily Macro Targets</label>
+                    <button type="button" onClick={() => setMacros(recommendedMacros())} className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide hover:text-emerald-300">Reset to recommended</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                    {[['protein','Protein','text-blue-400'],['carbs','Carbs','text-orange-400'],['fats','Fats','text-yellow-400']].map(([key,label,color]) => (
+                        <div key={key} className="bg-gray-900 border border-gray-700 rounded-xl p-3">
+                            <div className={`text-[10px] font-bold uppercase ${color} mb-1`}>{label} (g)</div>
+                            <input type="number" inputMode="numeric" value={macros?.[key] ?? ''} onChange={e => setMacros(m => ({ ...(m || recommendedMacros()), [key]: e.target.value }))} className="w-full bg-transparent text-white text-lg font-bold outline-none" placeholder="0" />
+                        </div>
+                    ))}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-2">Leave as recommended, or set your own. Calories ≈ P×4 + C×4 + F×9.</p>
             </div>
 
             <button onClick={handleSave} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-white shadow-lg shadow-emerald-900/20 active:scale-95 transition">
