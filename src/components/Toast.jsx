@@ -4,6 +4,7 @@ import { CheckCircle, AlertTriangle, Info, X } from 'lucide-react';
 // Lightweight, non-blocking toast system to replace the app's blocking alert()s.
 // Usage: const toast = useToast(); toast('Logged to Lunch', 'success').
 const ToastContext = createContext(() => {});
+// eslint-disable-next-line react-refresh/only-export-components
 export const useToast = () => useContext(ToastContext);
 
 let idCounter = 0;

@@ -1,5 +1,5 @@
 import { db } from "../lib/firebase"; 
-import { collection, query, limit, addDoc, orderBy, startAt, endAt, getDocs, where } from "firebase/firestore";
+import { collection, query, limit, addDoc, orderBy, getDocs } from "firebase/firestore";
 import { generateContent } from "../lib/ai"; 
 
 const USDA_API_KEY = 'FwJSd1knWWtSYLVfwdlh2Twc01RI3Rp1E1odh3Us'; 
@@ -49,7 +49,7 @@ export const getSuggestions = async (searchQuery) => {
   }
 };
 
-export const saveToCache = async (items, searchQuery) => {
+export const saveToCache = async (items) => {
   if (!items || items.length === 0) return;
   const topResult = items[0]; 
   
@@ -101,7 +101,7 @@ export const searchByBarcode = async (barcode) => {
        };
     }
     return null;
-  } catch (err) {
+  } catch {
     return null;
   }
 };
@@ -181,7 +181,7 @@ export const searchUSDA = async (query) => {
         carbs: Math.round((getNut('205') || 0) * ratio),
       };
     });
-  } catch (error) { return []; }
+  } catch { return []; }
 };
 
 export const searchOpenFoodFacts = async (query) => {
@@ -211,7 +211,7 @@ export const searchOpenFoodFacts = async (query) => {
         // Per-100g macros -> base label must be 100g (not the serving_size) so logged totals are correct.
         weight_amount: "100g"
     }));
-  } catch (error) { return []; }
+  } catch { return []; }
 };
 
 // --- 5. MAIN SEARCH ---

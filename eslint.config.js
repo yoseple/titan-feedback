@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // functions/ is a separate CommonJS (Node) package with its own eslint config;
+  // dist/ + dev-dist/ are build output. Don't lint them with the browser/ESM rules.
+  globalIgnores(['dist', 'dev-dist', 'functions']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

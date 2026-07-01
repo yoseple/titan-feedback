@@ -183,19 +183,6 @@ const Dashboard = () => {
 
   // --- ACTIONS ---
 
-  const handleFoodAddFromModal = (foodItem) => {
-      const cleanData = normalizeFoodData(foodItem);
-      actions.saveFood({
-         name: cleanData.name || 'Unknown Item',
-         calories: cleanData.calories,
-         protein: cleanData.protein,
-         carbs: cleanData.carbs, 
-         fats: cleanData.fats,
-         weight_amount: cleanData.weight_amount
-      }, getLocalDate(viewDate), addingToMeal); 
-      setAddingToMeal(null);
-  };
-
   const handleFoodSelect = (foodItem) => {
       const clean = normalizeFoodData(foodItem);
       setScannedResult(clean);
@@ -514,18 +501,16 @@ Request: "${msg}"
         
         if (data.type === 'update_plan') {
              const updates = data.updates || [];
-             let confirmationMsg = "Updated: ";
-             
+
              for (const u of updates) {
                 const targetId = normalizeId(u.id || u.day);
                 if (targetId) {
                     await actions.updateWorkoutPlan(targetId, {
                         ...u,
-                        id: targetId, 
+                        id: targetId,
                         day: u.day || targetId.charAt(0).toUpperCase() + targetId.slice(1),
                         exercises: Array.isArray(u.exercises) ? u.exercises : []
                     });
-                    confirmationMsg += `${targetId.charAt(0).toUpperCase() + targetId.slice(1)}, `;
                 }
              }
              setChatHistory(p => [...p, { role: 'ai', content: "I've updated your Workout Plan. Swapping tabs now..." }]);
