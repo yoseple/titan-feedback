@@ -94,7 +94,9 @@ export const searchByBarcode = async (barcode) => {
          protein: Math.round(val('proteins_100g', 'proteins', 'proteins_value')),
          carbs: Math.round(val('carbohydrates_100g', 'carbohydrates', 'carbohydrates_value')),
          fats: Math.round(val('fat_100g', 'fat', 'fat_value')),
-         weight_amount: p.serving_size || "100g",
+         // Macros above are per-100g, so label the base as 100g. Labeling it with the product
+         // serving_size (e.g. "45 g") while keeping per-100g numbers over/under-counted on log.
+         weight_amount: "100g",
          source: 'Scan 📸'
        };
     }
@@ -137,9 +139,20 @@ export const searchUSDA = async (query) => {
     if (!searchData.foods || searchData.foods.length === 0) return [];
 
     return searchData.foods.map(item => {
+      const nutrients = item.foodNutrients || [];
       const getNut = (id1, id2) => {
-         const n = item.foodNutrients.find(x => x.nutrientNumber === id1 || x.nutrientNumber === id2);
+         const n = nutrients.find(x => x.nutrientNumber === id1 || x.nutrientNumber === id2);
          return n ? (n.value || 0) : 0;
+      };
+      // Energy: prefer kcal (nutrient 208 / unit KCAL). Only fall back to kJ (268) WITH the
+      // 4.184 conversion — never return a raw kilojoule value as kcal (that inflated calories
+      // ~4.184x whenever the kJ entry was listed before the kcal entry, which USDA does not order).
+      const getEnergyKcal = () => {
+         const kcal = nutrients.find(x => x.nutrientNumber === '208' || (x.unitName && x.unitName.toUpperCase() === 'KCAL'));
+         if (kcal && kcal.value) return kcal.value;
+         const kj = nutrients.find(x => x.nutrientNumber === '268' || (x.unitName && x.unitName.toUpperCase() === 'KJ'));
+         if (kj && kj.value) return kj.value / 4.184;
+         return 0;
       };
       
       let servingLabel = "100g"; 
@@ -162,7 +175,7 @@ export const searchUSDA = async (query) => {
         source: 'USDA',
         category: categorizeFood(item.description),
         weight_amount: servingLabel,
-        calories: Math.round((getNut('208', '268') || 0) * ratio),
+        calories: Math.round((getEnergyKcal() || 0) * ratio),
         protein: Math.round((getNut('203') || 0) * ratio),
         fats: Math.round((getNut('204') || 0) * ratio),
         carbs: Math.round((getNut('205') || 0) * ratio),
@@ -195,7 +208,8 @@ export const searchOpenFoodFacts = async (query) => {
         protein: Math.round(item.nutriments?.proteins_100g || item.nutriments?.proteins || 0),
         fats: Math.round(item.nutriments?.fat_100g || item.nutriments?.fat || 0),
         carbs: Math.round(item.nutriments?.carbohydrates_100g || item.nutriments?.carbohydrates || 0),
-        weight_amount: item.serving_size || "100g"
+        // Per-100g macros -> base label must be 100g (not the serving_size) so logged totals are correct.
+        weight_amount: "100g"
     }));
   } catch (error) { return []; }
 };
