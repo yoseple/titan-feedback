@@ -5,6 +5,7 @@ import {
   scaleMacros,
   computeAmountMacros,
   basisFromSearchItem,
+  basisFromItem,
   basisFromLog,
   buildFoodLog,
   displayAmount,
@@ -88,6 +89,25 @@ describe('unit conversion keeps grams constant (and never balloons servings)', (
   });
   it('to-serving with unknown base collapses to 1 (not the raw gram count)', () => {
     expect(convertQuantity(250, 'g', 'serving', null)).toBe(1);
+  });
+});
+
+describe('basisFromItem — re-logging a stored item uses its immutable base', () => {
+  it('serving-only V2 item re-logs at the per-serving base, not the prior total', () => {
+    // AI food: base 300/serving, previously logged as 2 servings (total 600).
+    const stored = buildFoodLog(
+      basisFromSearchItem({ calories: 300, protein: 0, carbs: 0, fats: 0, weight_amount: '1 serving' }),
+      2, 'serving', { name: 'AI Meal' },
+    );
+    expect(stored.calories).toBe(600);
+    const basis = basisFromItem(stored);
+    // re-log defaults to 1 serving -> 300, NOT 600
+    expect(computeAmountMacros(basis, 1, 'serving').calories).toBe(300);
+  });
+  it('falls back to weight_amount for a plain search item', () => {
+    const basis = basisFromItem({ calories: 200, protein: 0, carbs: 0, fats: 0, weight_amount: '100g' });
+    expect(basis.gramScalable).toBe(true);
+    expect(computeAmountMacros(basis, 100, 'g').calories).toBe(200);
   });
 });
 

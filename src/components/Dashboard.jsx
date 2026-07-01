@@ -12,6 +12,10 @@ import { INITIAL_MEALS, DEFAULT_WORKOUTS } from '../data/defaults';
 import { useTitanData } from '../hooks/useTitanData';
 import { categorizeFood, searchUSDA, searchAI, computeMacroTargets } from '../utils/nutrition';
 import { getLocalDate } from '../utils/date';
+import {
+  normalizeFoodData, getBaseGramWeight, convertQuantity,
+  basisFromItem, basisFromLog, computeAmountMacros, buildFoodLog,
+} from '../domain/foodMath';
 
 // --- MODALS & COMPONENTS ---
 import Onboarding from './modals/Onboarding'; 
@@ -30,94 +34,8 @@ const MEAL_SECTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 // getLocalDate now lives in ../utils/date (shared with ConsistencyHeatmap so day
 // buckets agree). Imported above.
 
-const cleanMacro = (val) => {
-  if (typeof val === 'number') return val;
-  if (!val) return 0;
-  const match = val.toString().match(/(\d+(\.\d+)?)/);
-  return match ? Math.round(parseFloat(match[0])) : 0;
-};
-
-// IMPROVED: Detects base weight from strings like "1 cup (158g)" or "100g"
-const getBaseGramWeight = (weightStr) => {
-    if (!weightStr) return null;
-    const str = weightStr.toLowerCase().trim();
-    
-    // 1. Look for explicit parenthesis format: "1 cup (158g)"
-    const parenMatch = str.match(/\((\d+(\.\d+)?)\s*g\)/);
-    if (parenMatch) return parseFloat(parenMatch[1]);
-
-    // 2. Look for explicit gram start: "100g", "100 g"
-    const gramMatch = str.match(/^(\d+(\.\d+)?)\s*g/);
-    if (gramMatch) return parseFloat(gramMatch[1]);
-
-    // 3. Look for Ounce format and convert: "4 oz"
-    const ozMatch = str.match(/^(\d+(\.\d+)?)\s*oz/);
-    if (ozMatch) return parseFloat(ozMatch[1]) * 28.3495;
-
-    return null; 
-};
-
-// MATH HELPER: Safe Unit Conversion (FIXED LOGIC)
-const convertQuantity = (amount, fromUnit, toUnit, baseWeightInGrams) => {
-    // 1. Constants
-    const OZ = 28.3495;
-    const FLOZ = 29.5735;
-
-    // 2. Normalize to Grams first
-    // This logic is now independent of baseWeight if moving between g/oz/floz
-    let grams = 0;
-    
-    if (fromUnit === 'g') grams = amount;
-    else if (fromUnit === 'oz') grams = amount * OZ;
-    else if (fromUnit === 'floz') grams = amount * FLOZ;
-    else if (fromUnit === 'serving') {
-        // Only need base weight if coming FROM a serving
-        if (!baseWeightInGrams) return amount; 
-        grams = amount * baseWeightInGrams;
-    }
-
-    // 3. Convert Grams to Target
-    if (toUnit === 'g') return Math.round(grams); // Round grams to integer
-    if (toUnit === 'oz') return parseFloat((grams / OZ).toFixed(2));
-    if (toUnit === 'floz') return parseFloat((grams / FLOZ).toFixed(2));
-    if (toUnit === 'serving') {
-        if (!baseWeightInGrams) return 1; // unknown base -> 1 serving, never carry the gram count over (prevents ~100x blow-up)
-        return parseFloat((grams / baseWeightInGrams).toFixed(2));
-    }
-
-    return amount;
-};
-
-const normalizeFoodData = (item) => {
-    let cleanItem = {
-        ...item,
-        calories: cleanMacro(item.calories || item.kcal || item.energy),
-        protein: cleanMacro(item.protein || item.prot || item.proteins),
-        carbs: cleanMacro(item.carbs || item.carb || item.carbohydrates || item.carbohydrate),
-        fats: cleanMacro(item.fats || item.fat || item.lipid || item.lipids),
-        weight_amount: item.weight || item.weight_amount || item.amount || "1 serving"
-    };
-
-    if (cleanItem.ingredients && Array.isArray(cleanItem.ingredients)) {
-        cleanItem.ingredients = cleanItem.ingredients.map(ing => ({
-            ...ing,
-            calories: cleanMacro(ing.calories),
-            protein: cleanMacro(ing.protein),
-            carbs: cleanMacro(ing.carbs || ing.carb || ing.carbohydrates),
-            fats: cleanMacro(ing.fats || ing.fat),
-            weight: ing.weight || ing.weight_amount || '1 serving'
-        }));
-
-        if (cleanItem.calories === 0) {
-            let c = 0, p = 0, ca = 0, f = 0;
-            cleanItem.ingredients.forEach(ing => {
-                c += ing.calories; p += ing.protein; ca += ing.carbs; f += ing.fats;
-            });
-            cleanItem.calories = c; cleanItem.protein = p; cleanItem.carbs = ca; cleanItem.fats = f;
-        }
-    }
-    return cleanItem;
-};
+// Food math (parsing, unit conversion, normalization, and the immutable-basis model)
+// now lives in ../domain/foodMath (pure + unit-tested). Imported above.
 
 // Helper to normalize day IDs
 const normalizeId = (input) => {
@@ -185,17 +103,15 @@ const Dashboard = () => {
 
   const handleFoodSelect = (foodItem) => {
       const clean = normalizeFoodData(foodItem);
-      setScannedResult(clean);
+      const basis = basisFromItem(clean);
+      setScannedResult({ ...clean, basis });
       setAddingToMeal(foodItem.targetMeal || addingToMeal);
 
-      // Pick the default unit from the food's base weight. Foods with a real gram base (e.g.
-      // "100g", "45 g") default to grams so the amount scales macros. Foods with NO gram base
-      // (e.g. "1 serving", AI estimates) are serving-only — defaulting them to grams either did
-      // nothing when edited or, after a unit switch, inflated macros ~100x.
-      const base = getBaseGramWeight(clean.weight_amount);
-      if (base) {
+      // Gram-scalable foods default to grams (amount scales macros); serving-only foods
+      // (e.g. "1 serving", AI estimates) default to 1 serving so gram edits can't misbehave.
+      if (basis.gramScalable) {
           setServingUnit('g');
-          setNumServings(base);
+          setNumServings(basis.baseGrams);
       } else {
           setServingUnit('serving');
           setNumServings(1);
@@ -204,61 +120,31 @@ const Dashboard = () => {
 
   // --- SMART CALCULATOR ---
   const calculationData = useMemo(() => {
-      if (!scannedResult) return { c:0, p:0, ca:0, f:0 };
-      
-      const baseWeight = getBaseGramWeight(scannedResult.weight_amount);
-      const base = scannedResult; 
-      
-      let multiplier = 1;
-
-      if (servingUnit === 'serving') {
-          multiplier = numServings;
-      } 
-      else if (baseWeight) {
-          let inputInGrams = numServings;
-          if (servingUnit === 'oz') inputInGrams = numServings * 28.3495;
-          if (servingUnit === 'floz') inputInGrams = numServings * 29.5735;
-          
-          multiplier = inputInGrams / baseWeight;
-      }
-
+      const basis = scannedResult?.basis;
+      if (!basis) return { c:0, p:0, ca:0, f:0, baseWeight: null };
+      const t = computeAmountMacros(basis, numServings, servingUnit);
       return {
-          c: Math.round(base.calories * multiplier),
-          p: Math.round(base.protein * multiplier),
-          ca: Math.round(base.carbs * multiplier),
-          f: Math.round(base.fats * multiplier),
-          baseWeight 
+          c: t.calories, p: t.protein, ca: t.carbs, f: t.fats,
+          baseWeight: basis.gramScalable ? basis.baseGrams : null,
       };
   }, [scannedResult, numServings, servingUnit]);
 
   // --- UNIT SWITCHER ---
   const handleUnitChange = (newUnit) => {
-      if (!scannedResult) return;
-      const baseWeight = getBaseGramWeight(scannedResult.weight_amount);
-      const newAmount = convertQuantity(numServings, servingUnit, newUnit, baseWeight);
-      
+      const basis = scannedResult?.basis;
+      if (!basis) return;
+      const newAmount = convertQuantity(numServings, servingUnit, newUnit, basis.baseGrams);
       setNumServings(newAmount);
       setServingUnit(newUnit);
   };
 
   const handleScanConfirm = () => {
-      if (!scannedResult) return;
-      
-      let finalLabel = "";
-      if (servingUnit === 'serving') {
-          finalLabel = `${numServings} x ${scannedResult.weight_amount}`;
-      } else {
-          finalLabel = `${numServings} ${servingUnit}`;
-      }
+      const basis = scannedResult?.basis;
+      if (!basis) return;
 
-      const payload = {
-         name: scannedResult.name || 'Unknown Food',
-         calories: calculationData.c,
-         protein: calculationData.p,
-         carbs: calculationData.ca,
-         fats: calculationData.f,
-         weight_amount: finalLabel
-      };
+      // Store the immutable basis + amount (+ recomputed totals). Editing later just reloads
+      // the base and re-applies the amount — no reverse-engineering, no compounding labels.
+      const payload = buildFoodLog(basis, numServings, servingUnit, { name: scannedResult.name || 'Unknown Food' });
       const dateStr = getLocalDate(viewDate);
       const mealType = addingToMeal || scannedResult.mealType;
       // An existing (internal-id) log is edited in place; external results (usda/off/ai_) are new logs.
@@ -271,53 +157,19 @@ const Dashboard = () => {
       } else {
           actions.saveFood(payload, dateStr, mealType);
       }
-      
+
       setScannedResult(null);
       setAddingToMeal(null);
   };
   
   // --- RESTORE EDIT STATE ---
   const handleEditLog = (logItem) => {
-      let currentUnit = 'serving';
-      let currentAmount = 1;
-      let baseStats = { ...normalizeFoodData(logItem) }; 
-
-      const label = logItem.weight_amount || "";
-      const match = label.match(/^(\d+(\.\d+)?)\s*(.*)$/);
-      
-      if (match) {
-          currentAmount = parseFloat(match[1]);
-          const textPart = match[3].toLowerCase().trim();
-          
-          if (textPart === 'g' || textPart === 'grams') currentUnit = 'g';
-          else if (textPart === 'oz' || textPart === 'ounces') currentUnit = 'oz';
-          else if (textPart === 'floz' || textPart === 'fl oz') currentUnit = 'floz';
-          else if (textPart.startsWith('x ')) {
-              // Serving-format label like "2 x 100g": the stored macros were ALREADY scaled by the
-              // serving count at log time. Divide back to the true per-serving base and restore the
-              // original base label, so the smart calculator re-applies the multiplier exactly once.
-              // (Previously it re-multiplied the stored total, doubling calories on every re-edit.)
-              currentUnit = 'serving';
-              const divisor = currentAmount > 0 ? currentAmount : 1;
-              baseStats.calories = Math.round((baseStats.calories || 0) / divisor);
-              baseStats.protein  = Math.round((baseStats.protein  || 0) / divisor);
-              baseStats.carbs    = Math.round((baseStats.carbs    || 0) / divisor);
-              baseStats.fats     = Math.round((baseStats.fats     || 0) / divisor);
-              baseStats.weight_amount = match[3].slice(2).trim() || "1 serving";
-              setNumServings(currentAmount);
-              setServingUnit(currentUnit);
-              setScannedResult({ ...baseStats, mealType: logItem.mealType, id: logItem.id });
-              return;
-          }
-      }
-
-      if (currentAmount > 0) {
-          baseStats.weight_amount = logItem.weight_amount;
-      }
-
-      setNumServings(currentAmount);
-      setServingUnit(currentUnit);
-      setScannedResult({ ...baseStats, mealType: logItem.mealType, id: logItem.id });
+      // basisFromLog reconstructs the immutable base + amount from the stored log, handling
+      // both the new V2 schema and legacy V1 logs (already-scaled totals + a label string).
+      const basis = basisFromLog(logItem);
+      setNumServings(basis.quantity);
+      setServingUnit(basis.unit);
+      setScannedResult({ name: logItem.name, id: logItem.id, mealType: logItem.mealType, weight_amount: logItem.weight_amount, basis });
   };
 
   // --- RECIPE EDITOR LOGIC ---

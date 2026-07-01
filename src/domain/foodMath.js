@@ -125,6 +125,17 @@ export const basisFromSearchItem = (item) => {
   return { base, baseGrams, gramScalable: baseGrams != null };
 };
 
+// Build a basis for LOGGING an item. Prefers a stored immutable base (V2 items from
+// history / saved logs) so re-logging uses the true per-unit base, not a prior scaled
+// total; otherwise derives it from the item's weight_amount.
+export const basisFromItem = (item) => {
+  if (item && item.base && (item.schemaVersion || 0) >= 2) {
+    const baseGrams = item.baseGrams ?? null;
+    return { base: { ...item.base }, baseGrams, gramScalable: baseGrams != null };
+  }
+  return basisFromSearchItem(item);
+};
+
 // Reconstruct a basis from a stored food_log. Handles the new immutable V2 schema
 // AND legacy V1 logs (which stored already-scaled totals + a label string).
 export const basisFromLog = (log) => {
