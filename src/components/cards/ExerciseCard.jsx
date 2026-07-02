@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Check, ChevronUp, ChevronDown, BarChart2 } from 'lucide-react';
 
 const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpleMode, onViewHistory }) => {
@@ -7,6 +7,16 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
   const numSets = parseInt(ex.sets) || 1;
   const type = ex.type || (["Cardio", "Run", "Walk", "Treadmill"].some(k => ex.name.includes(k)) ? 'cardio' : ["Pushups", "Plank", "Burpees"].some(k => ex.name.includes(k)) ? 'bodyweight' : 'weighted');
   const [setsData, setSetsData] = useState(() => Array.from({ length: numSets }, () => ({ weight: '', reps: '', duration: '', distance: '', completed: false, logId: null })));
+
+  // The most recent PRIOR session for this exercise (its sets, oldest-first) — used to
+  // prefill today's un-logged sets so an unchanged set is a single confirm tap.
+  const lastSession = useMemo(() => {
+    if (!history) return [];
+    const prior = history.filter(h => h.exercise === ex.name && h.date < date);
+    if (!prior.length) return [];
+    const lastDate = prior.reduce((m, h) => (h.date > m ? h.date : m), prior[0].date);
+    return prior.filter(h => h.date === lastDate).sort((a, b) => (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0));
+  }, [history, ex.name, date]);
 
   useEffect(() => {
     if (!history) return;
@@ -26,13 +36,22 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
           } else {
              const existing = prev[i];
              if(existing && !existing.completed && (existing.weight || existing.reps || existing.duration || existing.distance)) {
-                next[i] = existing;
+                next[i] = existing; // keep the user's in-progress typing
+             } else if (lastSession[i]) {
+                // Prefill from last session (editable, not marked completed).
+                next[i] = {
+                   weight: lastSession[i].weight ? String(lastSession[i].weight) : '',
+                   reps: lastSession[i].reps ? String(lastSession[i].reps) : '',
+                   duration: lastSession[i].duration ? String(lastSession[i].duration) : '',
+                   distance: lastSession[i].distance ? String(lastSession[i].distance) : '',
+                   completed: false, logId: null,
+                };
              }
           }
        }
        return next;
     });
-  }, [history, date, ex.name, numSets]);
+  }, [history, date, ex.name, numSets, lastSession]);
 
   const toggleSet = (idx) => {
      const set = setsData[idx];
@@ -62,6 +81,9 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
        </div>
        {isExpanded && (
           <div className="p-3 border-t border-gray-700/50 space-y-2">
+             {lastSession.length > 0 && !setsData.some(s => s.completed) && (
+                <div className="text-[10px] text-gray-500 text-center pb-1">↺ Last time: {type === 'cardio' ? `${lastSession[0].duration || 0} min` : `${lastSession[0].weight || 0} lb × ${lastSession[0].reps || 0}`}</div>
+             )}
              <div className="flex text-[9px] text-gray-500 uppercase font-bold justify-center gap-2"><div className="w-6 text-center">#</div>{type === 'weighted' && <div className="w-20 text-center">Lbs</div>}<div className="w-20 text-center">{type === 'cardio' ? 'Mins' : 'Reps'}</div><div className="w-10"></div></div>
              {setsData.map((s, i) => (
                 <div key={i} className="flex gap-2 items-center justify-center">

@@ -72,6 +72,26 @@ export function useFoodLogging({ actions, viewDate, onLogged, onError }) {
     setAddingToMeal(null);
   };
 
+  // One-tap re-log: log an item immediately at its stored portion (or 1 serving / its base
+  // grams if it has none) without opening the confirm sheet. Used by Recent/Saved rows.
+  const quickLog = async (foodItem, mealType) => {
+    const clean = normalizeFoodData(foodItem);
+    const basis = basisFromItem(clean);
+    const quantity = Number(foodItem.quantity) > 0
+      ? Number(foodItem.quantity)
+      : (basis.gramScalable ? basis.baseGrams : 1);
+    const unit = foodItem.unit || (basis.gramScalable ? 'g' : 'serving');
+    const payload = buildFoodLog(basis, quantity, unit, { name: clean.name || 'Unknown Food' });
+    const dateStr = getLocalDate(viewDate);
+    try {
+      await actions.saveFood(payload, dateStr, mealType);
+    } catch (err) {
+      if (onError) onError(err, payload);
+      return;
+    }
+    if (onLogged) onLogged(payload, false);
+  };
+
   const handleEditLog = (logItem) => {
     // basisFromLog reconstructs the immutable base + amount from the stored log, handling
     // both the new V2 schema and legacy V1 logs (already-scaled totals + a label string).
@@ -89,6 +109,6 @@ export function useFoodLogging({ actions, viewDate, onLogged, onError }) {
     numServings, setNumServings,
     servingUnit, setServingUnit,
     calculationData,
-    handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog,
+    handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog, quickLog,
   };
 }

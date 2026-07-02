@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Dumbbell, Utensils, Flame, Loader, Trash2, Activity, Edit2, 
-  ChevronLeft, ChevronRight, Send, Bot, Settings, Plus, Check, 
-  ShoppingCart, X, Scan, Scale, RefreshCw, ChevronDown, Wand2
+import {
+  Dumbbell, Utensils, Flame, Loader, Trash2, Activity, Edit2,
+  ChevronLeft, ChevronRight, Send, Bot, Settings, Plus, Check,
+  ShoppingCart, X, Scan, Scale, RefreshCw, ChevronDown, Wand2, LineChart
 } from 'lucide-react';
 
 // --- IMPORTS ---
@@ -32,6 +32,12 @@ import ExerciseCard from './cards/ExerciseCard';
 import MealCard from './cards/MealCard';
 
 const MEAL_SECTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
+
+// Best-guess meal for the quick-add FAB, by time of day.
+const defaultMealForNow = () => {
+  const h = new Date().getHours();
+  return h < 11 ? 'Breakfast' : h < 16 ? 'Lunch' : h < 21 ? 'Dinner' : 'Snacks';
+};
 
 // --- HELPERS ---
 // getLocalDate now lives in ../utils/date (shared with ConsistencyHeatmap so day
@@ -73,7 +79,7 @@ const Dashboard = () => {
   const {
     addingToMeal, setAddingToMeal, scannedResult, setScannedResult,
     numServings, setNumServings, servingUnit, setServingUnit,
-    calculationData, handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog,
+    calculationData, handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog, quickLog,
   } = useFoodLogging({
     actions,
     viewDate,
@@ -395,6 +401,9 @@ Request: "${msg}"
 
   // --- RENDER HELPERS ---
   const formattedDate = getLocalDate(viewDate);
+  // Progress is a rolling view with no date picker, so its date-scoped widgets (bodyweight
+  // logger, weekly trend) anchor to the real today, not the possibly-stale viewDate.
+  const todayStr = getLocalDate(new Date());
   // Only show the plan that matches today's weekday. If a customized plan has no entry for this
   // day, activeWorkout is undefined and the real "Rest Day" empty state shows (was: always workouts[0],
   // which showed Monday's plan on an unplanned day).
@@ -436,7 +445,7 @@ Request: "${msg}"
   // (single source of truth — replaces the old hardcoded 250/80 + weightLog-derived protein).
   const macroTargets = userProfile?.macroTargets
     || computeMacroTargets(tdee, userProfile?.goal, userProfile?.weight || weightLog[0]?.weight);
-  const weekCals = weeklyCalories(foodLog, formattedDate);
+  const weekCals = weeklyCalories(foodLog, todayStr);
   const calsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.calories || 0), 0);
   const protConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.protein || 0), 0);
   const carbsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.carbs || 0), 0);
@@ -468,9 +477,9 @@ Request: "${msg}"
         </div>
       </header>
 
-      {/* DATE NAVIGATION — only on the date-scoped tabs. It does nothing on Diet (a recipe
-          library) or Coach (a chat) and there falsely implies those views are date-filtered. */}
-      {['workouts', 'tracker'].includes(activeTab) && (
+      {/* DATE NAVIGATION — only on the per-day tabs (Workouts + the Diet log). Progress is
+          rolling analytics and Coach is a chat, so it's hidden there (dead control otherwise). */}
+      {['workouts', 'diet'].includes(activeTab) && (
       <div className="bg-gray-900 border-b border-gray-800 py-2 shrink-0 z-10 shadow-lg">
         <div className="max-w-5xl mx-auto px-4 flex justify-between items-center">
           <button aria-label="Previous day" onClick={() => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; })} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronLeft className="w-6 h-6"/></button>
@@ -531,58 +540,114 @@ Request: "${msg}"
             </div>
           )}
 
-          {/* --- DIET TAB --- */}
+          {/* --- DIET TAB — the eating home: today's calories + the meal diary --- */}
           {activeTab === 'diet' && (
             <div className="space-y-6 animate-in fade-in duration-300 pb-safe-bottom">
-               <div className="flex justify-between items-end">
-                   <h2 className="text-xl font-bold text-white">Meal Plans</h2>
-                   <button onClick={() => setEditingMeal({ name: '', calories: 0, protein: 0, carbs: 0, fats: 0, ingredients: [], instructions: '', tags: [] })} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-emerald-500 active:scale-95 transition shadow-lg shadow-emerald-900/20">
-                       <Plus className="w-4 h-4"/> New
-                   </button>
-               </div>
-               
-               <div className="grid md:grid-cols-2 gap-4">
-                   {allMeals.map((meal, i) => (
-                       <MealCard key={meal.id || i} meal={meal} isSelected={selectedMealIds.includes(meal.id)} onToggle={() => setSelectedMealIds(p => p.includes(meal.id) ? p.filter(x=>x!==meal.id) : [...p, meal.id])} onChefMode={setChefMeal} onEdit={setEditingMeal} onDelete={actions.deleteRecipe} />
-                   ))}
-               </div>
-               
-               <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mt-6 shadow-xl">
-                   <h3 className="font-bold text-gray-300 uppercase text-xs tracking-widest mb-4 flex items-center gap-2"><ShoppingCart size={16}/> Shopping List ({selectedMealIds.length})</h3>
-                   {Object.keys(shoppingList).length === 0 ? (
-                       <div className="text-gray-600 text-sm italic text-center py-4">Select meals to generate list.</div>
-                   ) : (
-                       <div className="grid md:grid-cols-2 gap-6">
-                           {Object.keys(shoppingList).map(category => (
-                               <div key={category}>
-                                   <div className="text-emerald-500 text-[10px] font-bold uppercase mb-2 border-b border-slate-700 pb-1">{category}</div>
-                                   <div className="space-y-1">
-                                       {shoppingList[category].map((item, idx) => { 
-                                           const isChecked = checkedShoppingItems[item.name]; 
-                                           return (
-                                               <div key={idx} onClick={() => setCheckedShoppingItems(p => ({...p, [item.name]: !p[item.name]}))} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${isChecked ? 'opacity-40' : 'hover:bg-slate-700 active:bg-slate-600'}`}>
-                                                   <div className={`w-5 h-5 rounded border flex items-center justify-center transition ${isChecked ? 'bg-emerald-600 border-emerald-600' : 'border-gray-500'}`}>
-                                                       {isChecked && <Check size={12} className="text-white"/>}
-                                                   </div>
-                                                   <span className={`text-sm font-medium ${isChecked ? 'line-through text-gray-500' : 'text-gray-300'}`}>{item.name}</span>
-                                               </div>
-                                           ); 
-                                       })}
+               {/* Today's calories + macro rings */}
+               <CalorieDashboard
+                 consumed={calsConsumed}
+                 goal={tdee}
+                 protein={protConsumed}
+                 proteinGoal={macroTargets.protein}
+                 carbs={carbsConsumed}
+                 carbsGoal={macroTargets.carbs}
+                 fats={fatsConsumed}
+                 fatsGoal={macroTargets.fats}
+               />
+
+               {/* Per-meal diary */}
+               <div className="space-y-4">
+                   {MEAL_SECTIONS.map(mealType => {
+                       const meals = activeFoodLogs.filter(f => f.mealType === mealType);
+                       return (
+                           <div key={mealType} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-sm">
+                               <div className="p-4 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
+                                   <div className="flex items-center gap-2">
+                                       <span className="font-bold text-gray-200 text-sm">{mealType}</span>
+                                       <span className="text-xs text-gray-400 font-mono bg-gray-800 px-2 py-1 rounded">{meals.reduce((s,f)=>s+(f.calories||0),0)} Cal</span>
                                    </div>
+                                   <button aria-label={`Add food to ${mealType}`} onClick={() => setAddingToMeal(mealType)} className="text-emerald-500 hover:text-emerald-400 p-2 bg-emerald-500/10 rounded-full active:bg-emerald-500/20 transition">
+                                       <Plus className="w-5 h-5"/>
+                                   </button>
                                </div>
-                           ))}
-                       </div>
-                   )}
+                               <div className="divide-y divide-gray-700/50">
+                                   {meals.map(f => (
+                                       <div key={f.id} className="p-3 flex justify-between items-center hover:bg-gray-700/30 active:bg-gray-700/50 transition">
+                                           <div className="flex-1 pr-4 min-w-0">
+                                               <div className="text-sm text-gray-300 font-medium truncate">{f.name}</div>
+                                               <div className="text-[10px] text-gray-400 mt-0.5 truncate">{f.calories} Cal • {f.protein}g P • {f.weight_amount}</div>
+                                           </div>
+                                           <div className="flex items-center gap-1 shrink-0">
+                                               <button aria-label="Edit entry" onClick={() => handleEditLog(f)} className="text-gray-500 hover:text-blue-400 p-3 active:scale-90"><Edit2 className="w-4 h-4"/></button>
+                                               <button aria-label="Delete entry" onClick={() => actions.deleteFood(f.id)} className="text-gray-500 hover:text-red-500 p-3 active:scale-90"><Trash2 className="w-4 h-4"/></button>
+                                           </div>
+                                       </div>
+                                   ))}
+                                   {meals.length === 0 && <button onClick={() => setAddingToMeal(mealType)} className="w-full p-4 text-center text-xs text-gray-500 italic hover:text-emerald-400 transition">+ Add your first {mealType.toLowerCase()}</button>}
+                               </div>
+                           </div>
+                       );
+                   })}
                </div>
+
+               {/* Recipes + shopping list (demoted to a disclosure) */}
+               <details className="bg-slate-800 rounded-xl border border-slate-700 shadow-xl overflow-hidden group">
+                   <summary className="p-4 flex items-center justify-between cursor-pointer list-none font-bold text-gray-200 text-sm select-none">
+                       <span className="flex items-center gap-2"><ShoppingCart size={16}/> My Recipes &amp; Shopping List</span>
+                       <ChevronDown className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" />
+                   </summary>
+                   <div className="p-4 pt-0 space-y-4">
+                       <div className="flex justify-between items-end">
+                           <h2 className="text-sm font-bold text-gray-300">Recipes</h2>
+                           <button onClick={() => setEditingMeal({ name: '', calories: 0, protein: 0, carbs: 0, fats: 0, ingredients: [], instructions: '', tags: [] })} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-emerald-500 active:scale-95 transition"><Plus className="w-3.5 h-3.5"/> New</button>
+                       </div>
+                       {allMeals.length === 0 ? (
+                           <div className="text-gray-500 text-sm italic text-center py-4">No recipes yet — tap New, or ask the Coach to build one.</div>
+                       ) : (
+                           <div className="grid md:grid-cols-2 gap-4">
+                               {allMeals.map((meal, i) => (
+                                   <MealCard key={meal.id || i} meal={meal} isSelected={selectedMealIds.includes(meal.id)} onToggle={() => setSelectedMealIds(p => p.includes(meal.id) ? p.filter(x=>x!==meal.id) : [...p, meal.id])} onChefMode={setChefMeal} onEdit={setEditingMeal} onDelete={actions.deleteRecipe} />
+                               ))}
+                           </div>
+                       )}
+                       <div className="border-t border-slate-700 pt-4">
+                           <h3 className="font-bold text-gray-300 uppercase text-xs tracking-widest mb-3 flex items-center gap-2"><ShoppingCart size={16}/> Shopping List ({selectedMealIds.length})</h3>
+                           {Object.keys(shoppingList).length === 0 ? (
+                               <div className="text-gray-500 text-sm italic text-center py-4">Select meals to generate a list.</div>
+                           ) : (
+                               <div className="grid md:grid-cols-2 gap-6">
+                                   {Object.keys(shoppingList).map(category => (
+                                       <div key={category}>
+                                           <div className="text-emerald-500 text-[10px] font-bold uppercase mb-2 border-b border-slate-700 pb-1">{category}</div>
+                                           <div className="space-y-1">
+                                               {shoppingList[category].map((item, idx) => {
+                                                   const isChecked = checkedShoppingItems[item.name];
+                                                   return (
+                                                       <button key={idx} onClick={() => setCheckedShoppingItems(p => ({...p, [item.name]: !p[item.name]}))} className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors ${isChecked ? 'opacity-40' : 'hover:bg-slate-700 active:bg-slate-600'}`}>
+                                                           <div className={`w-5 h-5 rounded border flex items-center justify-center transition ${isChecked ? 'bg-emerald-600 border-emerald-600' : 'border-gray-500'}`}>
+                                                               {isChecked && <Check size={12} className="text-white"/>}
+                                                           </div>
+                                                           <span className={`text-sm font-medium ${isChecked ? 'line-through text-gray-500' : 'text-gray-300'}`}>{item.name}</span>
+                                                       </button>
+                                                   );
+                                               })}
+                                           </div>
+                                       </div>
+                                   ))}
+                               </div>
+                           )}
+                       </div>
+                   </div>
+               </details>
             </div>
           )}
 
-          {/* --- TRACKER TAB --- */}
-          {activeTab === 'tracker' && (
+          {/* --- PROGRESS TAB (rolling analytics) --- */}
+          {activeTab === 'progress' && (
             <div className="space-y-6 animate-in fade-in duration-300 pb-safe-bottom">
                <ConsistencyHeatmap workoutLogs={workoutLogs} foodLogs={foodLog} />
 
-               {/* --- BODYWEIGHT / PROGRESS --- */}
+               {/* --- BODYWEIGHT --- */}
                <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 shadow-lg">
                    <div className="flex justify-between items-center mb-3">
                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2"><Scale className="w-4 h-4"/> Bodyweight</h4>
@@ -593,16 +658,16 @@ Request: "${msg}"
                        <input
                            type="number" inputMode="decimal" value={weightInput}
                            onChange={e => setWeightInput(e.target.value)}
-                           placeholder={`Log weight for ${formattedDate}`}
+                           placeholder={`Log today's weight (${todayStr})`}
+                           aria-label="Log bodyweight"
                            className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500 transition"
                        />
                        <button
                            onClick={async () => {
                                const w = parseFloat(weightInput);
                                if (!(w > 0)) return;
-                               // Await the write so a rejected save can't fire a false "Logged" toast.
                                try {
-                                   await actions.saveWeight(w, formattedDate);
+                                   await actions.saveWeight(w, todayStr);
                                    setWeightInput('');
                                    toast(`Logged ${w} lb`, 'success');
                                    track('weight_logged');
@@ -618,17 +683,6 @@ Request: "${msg}"
                        </button>
                    </div>
                </div>
-
-               <CalorieDashboard
-                 consumed={calsConsumed}
-                 goal={tdee}
-                 protein={protConsumed}
-                 proteinGoal={macroTargets.protein}
-                 carbs={carbsConsumed}
-                 carbsGoal={macroTargets.carbs}
-                 fats={fatsConsumed}
-                 fatsGoal={macroTargets.fats}
-               />
 
                {/* 7-DAY CALORIE TREND */}
                <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 shadow-lg">
@@ -646,40 +700,6 @@ Request: "${msg}"
                        })}
                    </div>
                    <div className="text-[10px] text-gray-500 mt-2 text-right">Target {tdee} cal/day</div>
-               </div>
-               
-               <div className="space-y-4">
-                   {MEAL_SECTIONS.map(mealType => { 
-                       const meals = activeFoodLogs.filter(f => f.mealType === mealType); 
-                       return (
-                           <div key={mealType} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-sm">
-                               <div className="p-4 bg-gray-900 border-b border-gray-700 flex justify-between items-center">
-                                   <div className="flex items-center gap-2">
-                                       <span className="font-bold text-gray-200 text-sm">{mealType}</span>
-                                       <span className="text-xs text-gray-500 font-mono bg-gray-800 px-2 py-1 rounded">{meals.reduce((s,f)=>s+(f.calories||0),0)} Cal</span>
-                                   </div>
-                                   <button onClick={() => setAddingToMeal(mealType)} className="text-emerald-500 hover:text-emerald-400 p-2 bg-emerald-500/10 rounded-full active:bg-emerald-500/20 transition">
-                                       <Plus className="w-5 h-5"/>
-                                   </button>
-                               </div>
-                               <div className="divide-y divide-gray-700/50">
-                                   {meals.map(f => (
-                                       <div key={f.id} className="p-3 flex justify-between items-center hover:bg-gray-700/30 active:bg-gray-700/50 transition">
-                                           <div className="flex-1 pr-4 min-w-0">
-                                               <div className="text-sm text-gray-300 font-medium truncate">{f.name}</div>
-                                               <div className="text-[10px] text-gray-500 mt-0.5 truncate">{f.calories} Cal • {f.protein}g P • {f.weight_amount}</div>
-                                           </div>
-                                           <div className="flex items-center gap-1 shrink-0">
-                                               <button onClick={() => handleEditLog(f)} className="text-gray-500 hover:text-blue-400 p-3 active:scale-90"><Edit2 className="w-4 h-4"/></button>
-                                               <button onClick={() => actions.deleteFood(f.id)} className="text-gray-500 hover:text-red-500 p-3 active:scale-90"><Trash2 className="w-4 h-4"/></button>
-                                           </div>
-                                       </div>
-                                   ))}
-                                   {meals.length === 0 && <div className="p-4 text-center text-xs text-gray-600 italic">No food logged.</div>}
-                               </div>
-                           </div>
-                       ); 
-                   })}
                </div>
             </div>
           )}
@@ -751,15 +771,29 @@ Request: "${msg}"
         </div>
       </div>
 
+      {/* QUICK-ADD FAB — one tap into logging the meal for the current time of day. Diet only
+          (it's the date-scoped log surface with a visible date; Progress is rolling analytics). */}
+      {activeTab === 'diet' && !scannedResult && !addingToMeal && (
+        <button
+          onClick={() => setAddingToMeal(defaultMealForNow())}
+          aria-label="Quick add food"
+          className="fixed right-4 bottom-24 z-40 w-14 h-14 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xl shadow-emerald-900/40 flex items-center justify-center active:scale-90 transition animate-in zoom-in"
+        >
+          <Plus className="w-7 h-7" />
+        </button>
+      )}
+
       {/* FOOTER NAV (Fixed Bottom) */}
       <div className="shrink-0 bg-gray-900/95 backdrop-blur-xl border-t border-gray-800 flex justify-around p-2 pb-safe-bottom z-50 shadow-2xl">
-         {['workouts', 'diet', 'tracker', 'coach'].map(tab => (
-           <button 
-             key={tab} 
-             onClick={() => setActiveTab(tab)} 
+         {['workouts', 'diet', 'progress', 'coach'].map(tab => (
+           <button
+             key={tab}
+             onClick={() => setActiveTab(tab)}
+             aria-label={tab}
+             aria-current={activeTab === tab ? 'page' : undefined}
              className={`flex-1 py-3 flex flex-col items-center gap-1.5 transition active:scale-95 rounded-xl ${activeTab === tab ? 'text-blue-500' : 'text-gray-500 hover:text-gray-300'}`}
            >
-             {tab === 'workouts' ? <Dumbbell className="w-6 h-6"/> : tab === 'diet' ? <Utensils className="w-6 h-6"/> : tab === 'tracker' ? <Activity className="w-6 h-6"/> : <Bot className="w-6 h-6"/>}
+             {tab === 'workouts' ? <Dumbbell className="w-6 h-6"/> : tab === 'diet' ? <Utensils className="w-6 h-6"/> : tab === 'progress' ? <LineChart className="w-6 h-6"/> : <Bot className="w-6 h-6"/>}
              <span className="text-[10px] font-bold uppercase tracking-wide">{tab}</span>
            </button>
          ))}
@@ -779,6 +813,7 @@ Request: "${msg}"
             onAddFood={handleFoodSelect}
             onScanFood={handleFoodSelect}
             onDeleteHistory={actions.deleteHistoryItem}
+            onQuickLog={(food) => quickLog(food, addingToMeal)}
           />
       )}
 
@@ -792,6 +827,16 @@ Request: "${msg}"
               </div>
               
               <div className="p-6 space-y-6 overflow-y-auto">
+                  {/* Meal selector — choose (or change) which meal this logs to */}
+                  <div className="grid grid-cols-4 gap-1.5">
+                      {MEAL_SECTIONS.map(m => {
+                          const active = (addingToMeal || scannedResult.mealType) === m;
+                          return (
+                              <button key={m} onClick={() => setAddingToMeal(m)} className={`py-2 rounded-lg text-[11px] font-bold transition active:scale-95 ${active ? 'bg-emerald-600 text-white' : 'bg-slate-900 border border-slate-700 text-gray-400 hover:border-emerald-500/50'}`}>{m}</button>
+                          );
+                      })}
+                  </div>
+
                   {/* Quick portion chips — accurate presets from the food's serving size */}
                   <div className="flex flex-wrap gap-2">
                       {getPortions(scannedResult).map((chip) => {

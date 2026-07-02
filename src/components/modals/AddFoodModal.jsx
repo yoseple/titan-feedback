@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
-import { Search, Loader, Wand2, X, Plus, Clock, Bookmark, ScanBarcode, Camera, Trash2, Flame } from 'lucide-react';
+import { Search, Loader, Wand2, X, Plus, Clock, Bookmark, ScanBarcode, Camera, Trash2, Flame, Zap } from 'lucide-react';
 
 // Defer the QR scanner (a wasm engine) until the Scan tab is actually opened.
 const Scanner = lazy(() => import('@yudiel/react-qr-scanner').then((m) => ({ default: m.Scanner })));
@@ -20,7 +20,7 @@ const useDebounce = (value, delay) => {
 
 // --- UPDATED FOOD ITEM COMPONENT ---
 // Changed to a flex container so we can have a Delete button side-by-side
-const FoodItem = ({ food, onClick, type, onDelete }) => (
+const FoodItem = ({ food, onClick, type, onDelete, onQuickLog }) => (
     <div className="w-full flex items-center gap-2 mb-1 group relative">
         <button onClick={onClick} className="flex-1 text-left p-3 bg-slate-700/30 hover:bg-slate-700 rounded-xl flex justify-between items-center transition border border-white/5 active:scale-[0.99]">
             <div>
@@ -32,7 +32,19 @@ const FoodItem = ({ food, onClick, type, onDelete }) => (
                 <div className="text-[10px] text-gray-500">kcal</div>
             </div>
         </button>
-        
+
+        {/* QUICK-LOG: one tap logs at the stored portion (Recent/Saved). Tap the row itself
+            to open the sheet and adjust the amount instead. */}
+        {onQuickLog && (
+            <button
+                onClick={(e) => { e.stopPropagation(); onQuickLog(food); }}
+                className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500 hover:text-white transition h-full flex items-center justify-center border border-emerald-500/20 active:scale-90"
+                title="Quick log" aria-label={`Quick log ${food.name}`}
+            >
+                <Zap size={16} />
+            </button>
+        )}
+
         {/* DELETE BUTTON: Only shows for 'history' type if onDelete is provided */}
         {type === 'history' && onDelete && (
             <button 
@@ -49,7 +61,7 @@ const FoodItem = ({ food, onClick, type, onDelete }) => (
     </div>
 );
 
-const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistory, savedMeals = [] }) => {
+const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistory, onQuickLog, savedMeals = [] }) => {
   const { foodHistory } = useTitanData();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState('search');
@@ -229,12 +241,13 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
                             <div className="mb-4">
                                 <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 pl-2 flex items-center gap-1"><Clock size={12}/> Recent</h4>
                                 {historyMatches.map((food, i) => (
-                                    <FoodItem 
-                                        key={`hist-${i}`} 
-                                        food={food} 
-                                        onClick={() => onAddFood(food)} 
-                                        type="history" 
-                                        onDelete={onDeleteHistory} // <--- Pass Delete Handler Here
+                                    <FoodItem
+                                        key={`hist-${i}`}
+                                        food={food}
+                                        onClick={() => onAddFood(food)}
+                                        type="history"
+                                        onDelete={onDeleteHistory}
+                                        onQuickLog={onQuickLog}
                                     />
                                 ))}
                             </div>
@@ -278,7 +291,7 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
               {/* SAVED & MANUAL TABS */}
               {activeTab === 'saved' && !isScanning && (
                   <div className="space-y-2">
-                     {savedMeals.length === 0 ? <div className="text-center text-gray-500 py-10">No saved meals.</div> : savedMeals.map((m, i) => <FoodItem key={i} food={{...m, weight_amount: '1 Meal'}} onClick={() => onAddFood(m)} type="saved"/>)}
+                     {savedMeals.length === 0 ? <div className="text-center text-gray-500 py-10">No saved meals.</div> : savedMeals.map((m, i) => <FoodItem key={i} food={{...m, weight_amount: '1 Meal'}} onClick={() => onAddFood(m)} type="saved" onQuickLog={onQuickLog}/>)}
                   </div>
               )}
               {activeTab === 'manual' && !isScanning && (
