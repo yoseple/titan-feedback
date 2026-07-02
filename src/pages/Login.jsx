@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { Dumbbell, Utensils, Bot } from 'lucide-react';
 import { track } from '../lib/analytics';
 
 export default function Login() {
@@ -47,10 +48,20 @@ export default function Login() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4">
       <div className="w-full max-w-md bg-gray-800 p-8 rounded-xl shadow-2xl border border-gray-700 text-center">
         <h1 className="text-4xl font-black mb-2 tracking-tighter text-blue-500">TITAN</h1>
-        <p className="text-gray-400 mb-8">
-          Operator Access Terminal
+        <p className="text-lg font-bold text-white">Your AI fitness &amp; diet coach.</p>
+        <p className="text-gray-300 mt-1 mb-6 text-sm leading-relaxed">
+          Track workouts, log meals, and hit your macros — with a coach that adapts to you.
         </p>
-        
+
+        <div className="flex justify-center gap-6 mb-7 text-gray-300">
+          {[[Dumbbell, 'Workouts'], [Utensils, 'Diet'], [Bot, 'AI Coach']].map(([Icon, label]) => (
+            <div key={label} className="flex flex-col items-center gap-1.5">
+              <div className="w-11 h-11 rounded-full bg-gray-900 border border-gray-700 flex items-center justify-center text-blue-400"><Icon className="w-5 h-5" /></div>
+              <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">{label}</span>
+            </div>
+          ))}
+        </div>
+
         {(error || authError) && <div className="bg-red-900/50 text-red-200 p-3 rounded mb-4 text-sm border border-red-700">{error || authError}</div>}
 
         {/* GOOGLE BUTTON */}
@@ -68,6 +79,8 @@ export default function Login() {
           </svg>
           {loading ? 'Connecting...' : 'Sign in with Google'}
         </button>
+
+        <p className="text-[11px] text-gray-500 mt-4">Free · No credit card · Your data stays yours</p>
 
       </div>
     </div>

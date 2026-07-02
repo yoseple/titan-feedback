@@ -49,4 +49,11 @@ export default defineConfig({
       },
     },
   },
+  test: {
+    // Pure domain/worker tests run in node (default). Component tests opt into jsdom
+    // per-file via `// @vitest-environment jsdom`. jest-dom matchers are registered globally.
+    environment: 'node',
+    setupFiles: ['./src/test/setup.js'],
+    css: false,
+  },
 })

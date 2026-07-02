@@ -45,7 +45,7 @@ const MEAL_SECTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 const Dashboard = () => {
   const navigate = useNavigate();
   const toast = useToast();
-  const { user, authLoading, workouts: rawWorkouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, actions } = useTitanData();
+  const { user, authLoading, loading: dataLoading, workouts: rawWorkouts, workoutLogs, weightLog, foodLog, customMeals, userProfile, actions } = useTitanData();
   // New users have no saved workout docs yet — fall back to the default 7-day plan so the app
   // isn't stuck showing "Rest Day" every day. Onboarding also seeds these; editing a day persists it.
   const workouts = (rawWorkouts && rawWorkouts.length > 0) ? rawWorkouts : DEFAULT_WORKOUTS;
@@ -325,7 +325,12 @@ Request: "${msg}"
 
     } catch (err) {
         console.error("Chat Error:", err);
-        setChatHistory(p => [...p, { role: 'ai', content: "Error connecting to AI." }]);
+        // Distinguish "out of daily chats" (a known state) from a real connection failure,
+        // instead of always blaming the connection.
+        const outOfQuota = err?.message && err.message.toLowerCase().includes('limit reached');
+        setChatHistory(p => [...p, { role: 'ai', content: outOfQuota
+            ? "You're out of AI chats for today — the daily limit resets tomorrow."
+            : "I couldn't reach the AI just now. Check your connection and try again." }]);
     }
 
     setIsChatProcessing(false);
@@ -437,12 +442,14 @@ Request: "${msg}"
   const carbsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.carbs || 0), 0);
   const fatsConsumed = activeFoodLogs.reduce((acc, curr) => acc + (curr.fats || 0), 0);
 
-  if (authLoading || (user && userProfile === undefined)) return <div className="h-screen flex items-center justify-center bg-gray-900 text-white"><Loader className="animate-spin w-10 h-10 text-blue-500"/></div>;
+  // Hold first paint until the Firestore snapshots have resolved too (dataLoading) — otherwise
+  // a cold open flashes 'Rest Day' / an empty heatmap / 'No food logged' as if data were lost.
+  if (authLoading || (user && (userProfile === undefined || dataLoading))) return <div className="h-dvh flex items-center justify-center bg-gray-900 text-white"><Loader className="animate-spin w-10 h-10 text-blue-500"/></div>;
   if (!user) return null;
   if (user && userProfile === null) return <Onboarding onComplete={handleOnboardingComplete} />;
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 font-sans text-gray-100 overflow-hidden relative touch-pan-x selection:bg-blue-500/30">
+    <div className="flex flex-col h-dvh bg-slate-900 font-sans text-gray-100 overflow-hidden relative selection:bg-blue-500/30">
       
       {/* HEADER */}
       <header className="bg-black/80 backdrop-blur-md border-b border-white/10 p-4 pt-safe-top shrink-0 z-20">
@@ -461,17 +468,20 @@ Request: "${msg}"
         </div>
       </header>
 
-      {/* DATE NAVIGATION */}
+      {/* DATE NAVIGATION — only on the date-scoped tabs. It does nothing on Diet (a recipe
+          library) or Coach (a chat) and there falsely implies those views are date-filtered. */}
+      {['workouts', 'tracker'].includes(activeTab) && (
       <div className="bg-gray-900 border-b border-gray-800 py-2 shrink-0 z-10 shadow-lg">
         <div className="max-w-5xl mx-auto px-4 flex justify-between items-center">
-          <button onClick={() => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; })} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronLeft className="w-6 h-6"/></button>
-          <div className="text-center">
+          <button aria-label="Previous day" onClick={() => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; })} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronLeft className="w-6 h-6"/></button>
+          <button onClick={() => setViewDate(new Date())} className="text-center active:scale-95 transition" title="Jump to today">
             <div className="font-bold text-white text-lg">{formattedDate === getLocalDate(new Date()) ? "TODAY" : viewDate.toLocaleDateString('en-US', { weekday: 'long' })}</div>
-            <div className="text-xs text-gray-500 font-mono tracking-widest">{formattedDate}</div>
-          </div>
-          <button onClick={() => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; })} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronRight className="w-6 h-6"/></button>
+            <div className="text-xs text-gray-400 font-mono tracking-widest">{formattedDate}</div>
+          </button>
+          <button aria-label="Next day" onClick={() => setViewDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; })} className="text-gray-400 hover:text-white p-3 active:scale-90 transition"><ChevronRight className="w-6 h-6"/></button>
         </div>
       </div>
+      )}
 
       {/* MAIN CONTENT */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-24 scroll-smooth">
@@ -676,7 +686,7 @@ Request: "${msg}"
 
           {/* --- COACH TAB --- */}
           {activeTab === 'coach' && (
-            <div className="h-[calc(100vh-180px)] flex flex-col animate-in fade-in duration-300">
+            <div className="h-[calc(100dvh-140px)] flex flex-col animate-in fade-in duration-300">
                 <div className="flex-1 bg-gray-800 rounded-t-xl border border-gray-700 border-b-0 overflow-y-auto p-4 space-y-4 shadow-inner">
                     <div className="flex justify-center mb-4"><span className="text-xs font-bold text-gray-600 bg-gray-900 px-3 py-1 rounded-full uppercase tracking-wider">Titan AI Active{chatQuota != null && ` · ${chatQuota} chats left`}</span></div>
                     {chatHistory.length <= 1 && !isChatProcessing && (
@@ -724,13 +734,15 @@ Request: "${msg}"
                 )}
 
                 <form onSubmit={handleChatSubmit} className="p-3 bg-gray-900 border-t border-gray-700 flex gap-2 pb-safe-bottom">
-                    <input 
-                        value={chatInput} 
-                        onChange={e=>setChatInput(e.target.value)} 
-                        placeholder="Ask Titan..." 
-                        className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
+                    <input
+                        value={chatInput}
+                        onChange={e=>setChatInput(e.target.value)}
+                        disabled={chatQuota === 0}
+                        placeholder={chatQuota === 0 ? "Out of AI chats until tomorrow" : "Ask Titan..."}
+                        aria-label="Ask Titan"
+                        className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition disabled:opacity-60"
                     />
-                    <button type="submit" disabled={isChatProcessing} className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl disabled:opacity-50 active:scale-95 transition shadow-lg shadow-blue-900/20">
+                    <button type="submit" aria-label="Send message" disabled={isChatProcessing || chatQuota === 0} className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl disabled:opacity-50 active:scale-95 transition shadow-lg shadow-blue-900/20">
                         <Send className="w-5 h-5"/>
                     </button>
                 </form>
@@ -773,7 +785,7 @@ Request: "${msg}"
       {/* --- LOG CONFIRMATION MODAL (SMART UNITS) --- */}
       {scannedResult && (
         <div className="fixed inset-0 z-[80] bg-black/95 backdrop-blur-md flex items-end sm:items-center justify-center sm:p-4 animate-in slide-in-from-bottom-10">
-           <div className="bg-slate-800 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-700 max-h-[90vh]">
+           <div className="bg-slate-800 w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-700 max-h-[90dvh]">
               <div className="p-5 border-b border-slate-700 bg-slate-900 flex justify-between items-center">
                   <h3 className="text-xl font-bold text-white truncate max-w-[70%]">{scannedResult.name}</h3>
                   <button onClick={() => { setScannedResult(null); setAddingToMeal(null); }} className="text-gray-400 p-2 bg-gray-800 rounded-full hover:bg-gray-700 active:scale-90 transition"><X size={20}/></button>
@@ -811,7 +823,7 @@ Request: "${msg}"
                               inputMode="decimal" 
                               value={numServings} 
                               onChange={e => { const val = parseFloat(e.target.value); setNumServings(isNaN(val) ? '' : val); }} 
-                              className="bg-transparent text-white text-3xl font-black w-24 text-right outline-none placeholder-gray-700 border-b border-gray-700 focus:border-blue-500 transition-colors" 
+                              className="bg-transparent text-white text-3xl font-black w-24 text-right outline-none placeholder-gray-500 border-b border-gray-700 focus:border-blue-500 transition-colors"
                               autoFocus
                           />
                           
@@ -874,7 +886,7 @@ Request: "${msg}"
       {/* --- RECIPE EDITOR MODAL (IMPROVED UI & FUNCTIONALITY) --- */}
       {editingMeal && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-end sm:items-center justify-center sm:p-4">
-            <div className="bg-slate-800 w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] sm:rounded-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 rounded-t-3xl border border-slate-700">
+            <div className="bg-slate-800 w-full sm:max-w-lg h-[95dvh] sm:h-auto sm:max-h-[90dvh] sm:rounded-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 rounded-t-3xl border border-slate-700">
                 
                 {/* Modal Header */}
                 <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900">
@@ -1038,7 +1050,7 @@ Request: "${msg}"
       {/* FOOD SEARCH MODAL (Overlay) */}
       {isFoodSearching && editingMeal && (
         <div className="fixed inset-0 z-[70] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4">
-           <div className="bg-slate-800 w-full sm:max-w-md h-[80vh] rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-700 animate-in slide-in-from-bottom-10">
+           <div className="bg-slate-800 w-full sm:max-w-md h-[80dvh] rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-slate-700 animate-in slide-in-from-bottom-10">
               <div className="p-4 bg-slate-900 border-b border-slate-700 flex gap-2 items-center">
                   <Scan className="text-gray-500" size={20}/>
                   <input 

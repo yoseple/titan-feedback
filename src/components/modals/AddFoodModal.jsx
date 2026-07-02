@@ -161,7 +161,7 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
 
   return (
     <div className="absolute inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 animate-in slide-in-from-bottom-10">
-       <div className="bg-slate-800 w-full sm:max-w-md h-[90vh] sm:h-[650px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-700">
+       <div className="bg-slate-800 w-full sm:max-w-md h-[90dvh] sm:h-[650px] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-700">
           
           <div className="p-4 border-b border-slate-700 bg-slate-900 flex justify-between items-center shrink-0">
              <h3 className="font-bold text-white flex gap-2"><Plus className="w-5 h-5 text-emerald-500"/> Add to {mealType}</h3>

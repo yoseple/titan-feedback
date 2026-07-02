@@ -7,7 +7,10 @@
     <link rel="mask-icon" href="/masked-icon.svg" color="#3b82f6" />
     <!-- Keep pinch-zoom enabled (WCAG 1.4.4) — this is a numbers-dense app; do NOT add
          maximum-scale/user-scalable=no (Android honors them and blocks low-vision zoom). -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- interactive-widget=resizes-content: when the on-screen keyboard opens, shrink the
+         layout viewport so the coach composer + sheet CTAs stay visible instead of being
+         covered. Keep pinch-zoom enabled (WCAG 1.4.4). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#111827" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

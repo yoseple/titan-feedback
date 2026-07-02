@@ -24,7 +24,10 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={toast}>
       {children}
-      <div className="fixed top-4 inset-x-0 z-[200] flex flex-col items-center gap-2 px-4 pointer-events-none">
+      {/* Live region so screen readers announce every success/error confirmation
+          ('Logged X · Y cal', 'Could not save') — otherwise SR users get no feedback
+          that an action worked. */}
+      <div role="status" aria-live="polite" aria-atomic="true" className="fixed top-4 inset-x-0 z-[200] flex flex-col items-center gap-2 px-4 pointer-events-none">
         {toasts.map((t) => {
           const Icon = t.type === 'success' ? CheckCircle : t.type === 'error' ? AlertTriangle : Info;
           const color =

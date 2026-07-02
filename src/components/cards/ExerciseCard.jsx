@@ -3,6 +3,7 @@ import { Check, ChevronUp, ChevronDown, BarChart2 } from 'lucide-react';
 
 const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpleMode, onViewHistory }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [warnIdx, setWarnIdx] = useState(null); // set row flagged for missing weight/reps
   const numSets = parseInt(ex.sets) || 1;
   const type = ex.type || (["Cardio", "Run", "Walk", "Treadmill"].some(k => ex.name.includes(k)) ? 'cardio' : ["Pushups", "Plank", "Burpees"].some(k => ex.name.includes(k)) ? 'bodyweight' : 'weighted');
   const [setsData, setSetsData] = useState(() => Array.from({ length: numSets }, () => ({ weight: '', reps: '', duration: '', distance: '', completed: false, logId: null })));
@@ -35,10 +36,16 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
 
   const toggleSet = (idx) => {
      const set = setsData[idx];
-     if (set.completed) { if (set.logId) onDeleteLog(set.logId); } 
-     else { 
-        if (type === 'weighted' && (!set.weight || !set.reps) && !simpleMode) return;
-        onLog(ex.name, set.weight||0, set.reps||0, set.distance||0, set.duration||0); 
+     if (set.completed) { if (set.logId) onDeleteLog(set.logId); }
+     else {
+        // Don't silently no-op: flag the row so the empty field(s) flash red instead of the
+        // check button appearing broken (a new user's likely first interaction).
+        if (type === 'weighted' && (!set.weight || !set.reps) && !simpleMode) {
+           setWarnIdx(idx);
+           setTimeout(() => setWarnIdx((c) => (c === idx ? null : c)), 1600);
+           return;
+        }
+        onLog(ex.name, set.weight||0, set.reps||0, set.distance||0, set.duration||0);
      }
   };
   
@@ -66,8 +73,8 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
                       </>
                    ) : (
                       <>
-                         {type === 'weighted' && <input type="number" placeholder="Lbs" className="w-20 bg-gray-900 text-white text-center p-2 rounded border border-gray-600" value={s.weight} onChange={e=>updateSet(i,'weight',e.target.value)} disabled={s.completed} />}
-                         <input type="number" placeholder="Reps" className="w-20 bg-gray-900 text-white text-center p-2 rounded border border-gray-600" value={s.reps} onChange={e=>updateSet(i,'reps',e.target.value)} disabled={s.completed} />
+                         {type === 'weighted' && <input type="number" inputMode="decimal" placeholder="Lbs" className={`w-20 bg-gray-900 text-white text-center p-2 rounded border ${warnIdx===i && !s.weight ? 'border-red-500' : 'border-gray-600'}`} value={s.weight} onChange={e=>updateSet(i,'weight',e.target.value)} disabled={s.completed} />}
+                         <input type="number" inputMode="numeric" placeholder="Reps" className={`w-20 bg-gray-900 text-white text-center p-2 rounded border ${warnIdx===i && !s.reps ? 'border-red-500' : 'border-gray-600'}`} value={s.reps} onChange={e=>updateSet(i,'reps',e.target.value)} disabled={s.completed} />
                       </>
                    )}
                    <button onClick={() => toggleSet(i)} className={`ml-auto w-10 h-10 flex items-center justify-center rounded ${s.completed ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-400'}`}><Check className="w-5 h-5"/></button>

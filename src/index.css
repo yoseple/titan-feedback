@@ -6,3 +6,26 @@ body {
   background-color: #0f172a; /* Dark Slate Background */
   color: white;
 }
+
+/* Floor form-control font-size at 16px: iOS Safari auto-zooms the viewport whenever a
+   focused input renders below 16px, and the coach composer, food search, ingredient qty,
+   and set inputs are all text-sm — so tapping almost any field jerks the layout. Keep them
+   visually compact via padding; only the computed font-size needs to be >=16px. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* Respect users who ask for less motion — neutralize the tailwindcss-animate entrances
+   and any transitions/animations instead of flashing content in. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
