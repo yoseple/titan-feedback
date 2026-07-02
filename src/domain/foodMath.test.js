@@ -11,6 +11,7 @@ import {
   displayAmount,
   convertQuantity,
   getPortions,
+  getEditingLogId,
 } from './foodMath';
 
 describe('parseGramsFromLabel', () => {
@@ -132,5 +133,36 @@ describe('displayAmount', () => {
     expect(displayAmount(2, 'serving', 100)).toBe('2 servings (200 g)');
     expect(displayAmount(1, 'serving', null)).toBe('1 serving');
     expect(displayAmount(150, 'g', 100)).toBe('150 g');
+  });
+});
+
+describe('getEditingLogId — edit-vs-new-log routing (BLOCKER regression)', () => {
+  // The confirm flow must EDIT only when handleEditLog set the explicit marker, and
+  // otherwise CREATE a new log — regardless of what id the item happens to carry.
+  const route = (item) => (getEditingLogId(item) ? 'update' : 'save');
+
+  it('items from Recent/Saved/Popular (plain Firestore ids, no marker) route to a NEW log', () => {
+    // These are the shapes handleFoodSelect produces: a plain auto-id, but NO __editingLogId.
+    const recent = { id: 'aB3xYz9plainFirestoreId', name: 'Chicken', basis: {} };   // food_history
+    const saved = { id: 'mealDocId123', name: 'My Meal', basis: {} };               // custom_meals
+    const popular = { id: 'cacheDocId456', name: 'Oats', basis: {} };               // food_cache
+    for (const item of [recent, saved, popular]) {
+      expect(getEditingLogId(item)).toBe(null);
+      expect(route(item)).toBe('save'); // NOT a foreign updateFood that silently drops the log
+    }
+  });
+
+  it('only an item marked by handleEditLog routes to an in-place UPDATE', () => {
+    const editing = { id: 'log789', __editingLogId: 'log789', name: 'Chicken', basis: {} };
+    expect(getEditingLogId(editing)).toBe('log789');
+    expect(route(editing)).toBe('update');
+  });
+
+  it('external usda/off/ai_ ids also create new logs (marker, not id-prefix, decides)', () => {
+    expect(route({ id: 'usda_123' })).toBe('save');
+    expect(route({ id: 'off_555' })).toBe('save');
+    expect(route({ id: 'ai_777' })).toBe('save');
+    expect(getEditingLogId(null)).toBe(null);
+    expect(getEditingLogId(undefined)).toBe(null);
   });
 });

@@ -12,7 +12,7 @@ import { INITIAL_MEALS, DEFAULT_WORKOUTS } from '../data/defaults';
 import { useTitanData } from '../hooks/useTitanData';
 import { categorizeFood, searchUSDA, searchAI, computeMacroTargets } from '../utils/nutrition';
 import { getLocalDate } from '../utils/date';
-import { normalizeFoodData, getBaseGramWeight, convertQuantity, getPortions } from '../domain/foodMath';
+import { normalizeFoodData, getBaseGramWeight, convertQuantity, getPortions, getEditingLogId } from '../domain/foodMath';
 import { useFoodLogging } from '../hooks/useFoodLogging';
 import { deriveUserContext, formatUserContext, formatChatMemory, parseCoachAction } from '../domain/coach';
 import { weeklyCalories } from '../domain/trends';
@@ -80,6 +80,10 @@ const Dashboard = () => {
     onLogged: (payload, isEdit) => {
       toast(`${isEdit ? 'Updated' : 'Logged'} ${payload.name} · ${payload.calories} cal`, 'success');
       track('food_logged', { method: payload.unit });
+    },
+    onError: (err) => {
+      toast('Could not save — check your connection and try again.', 'error');
+      console.error('Food log write failed:', err);
     },
   });
 
@@ -720,12 +724,13 @@ Request: "${msg}"
       {showLiftHistory && <LiftHistoryModal exerciseName={showLiftHistory} history={workoutLogs} onClose={() => setShowLiftHistory(null)} />}
       
       {addingToMeal && !scannedResult && (
-          <AddFoodModal 
-            mealType={addingToMeal} 
-            savedMeals={allMeals} 
-            onClose={() => setAddingToMeal(null)} 
-            onAddFood={handleFoodSelect} 
-            onScanFood={handleFoodSelect} 
+          <AddFoodModal
+            mealType={addingToMeal}
+            savedMeals={allMeals}
+            onClose={() => setAddingToMeal(null)}
+            onAddFood={handleFoodSelect}
+            onScanFood={handleFoodSelect}
+            onDeleteHistory={actions.deleteHistoryItem}
           />
       )}
 
@@ -822,8 +827,8 @@ Request: "${msg}"
               </div>
 
               <div className="p-4 bg-slate-900 border-t border-slate-700 pb-safe-bottom">
-                  <button onClick={handleScanConfirm} className="w-full bg-emerald-600 active:bg-emerald-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex justify-center items-center gap-2 transition active:scale-95">
-                      <Check size={24} /> {scannedResult.id && !scannedResult.id.toString().startsWith('usda') && !scannedResult.id.toString().startsWith('off') && !scannedResult.id.toString().startsWith('ai_') ? 'Update Log' : 'Log Food'}
+                  <button onClick={handleScanConfirm} disabled={!(Number(numServings) > 0)} className="w-full bg-emerald-600 active:bg-emerald-700 disabled:opacity-40 disabled:active:scale-100 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex justify-center items-center gap-2 transition active:scale-95">
+                      <Check size={24} /> {getEditingLogId(scannedResult) ? 'Update Log' : 'Log Food'}
                   </button>
               </div>
            </div>
@@ -940,7 +945,11 @@ Request: "${msg}"
                                                 onChange={e => updateIngredientInRecipe(i, val, e.target.value)}
                                                 className="bg-transparent text-xs text-gray-300 font-bold outline-none uppercase flex-1"
                                             >
-                                                {/* <option value="serving">Serving</option> */}
+                                                {/* Keep 'serving' as a real option: the resolved unit defaults to
+                                                    'serving' for serving-only ingredients, and a controlled
+                                                    <select value='serving'> with no matching option corrupts the
+                                                    ingredient on the next change. */}
+                                                <option value="serving">Serving</option>
                                                 <option value="g">Grams</option>
                                                 <option value="oz">Ounces</option>
                                                 <option value="floz">Fl Oz</option>

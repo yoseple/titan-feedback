@@ -85,7 +85,16 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {loading ? (
+        // Paint a minimal centered spinner (on the app's dark bg) while the initial
+        // auth state resolves, instead of a blank screen on cold load. Kept inline
+        // to avoid importing App-level UI and creating an import cycle.
+        <div className="min-h-screen flex items-center justify-center bg-gray-950">
+          <div className="w-8 h-8 rounded-full border-2 border-gray-700 border-t-emerald-500 animate-spin" />
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 }

@@ -224,6 +224,17 @@ export const displayAmount = (quantity, unit, baseGrams) => {
   return `${q} ${label}`;
 };
 
+// ---------------------------------------------------------------------------
+// LOG-WRITE ROUTING
+// Whether a confirmed food review EDITS an existing log or CREATES a new one is
+// driven ONLY by an explicit marker (__editingLogId) set on the true edit path
+// (useFoodLogging.handleEditLog). Items picked from Recent (food_history), Saved
+// (custom_meals) and Popular/Cached (food_cache) carry plain Firestore auto-ids
+// too, so inferring "edit" from the id misrouted them to an update on a foreign /
+// non-existent food_logs doc and silently lost the log. Returns the log id to edit
+// in place, or null to create a new log.
+export const getEditingLogId = (scannedResult) => scannedResult?.__editingLogId || null;
+
 // Build a V2 food_log document (immutable basis + amount + denormalized totals).
 export const buildFoodLog = (basis, quantity, unit, extra = {}) => {
   const totals = computeAmountMacros(basis, quantity, unit);
