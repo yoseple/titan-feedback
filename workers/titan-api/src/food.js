@@ -104,9 +104,15 @@ export function mapBarcodeProduct(p) {
 
 // --- Network functions (fetchImpl injectable for tests; defaults to global fetch) ---
 
+// OpenFoodFacts REJECTS requests without a descriptive User-Agent (returns 503).
+// Cloudflare Workers' fetch sends none by default, so we must set one explicitly.
+// Harmless for USDA. See https://openfoodfacts.github.io/openfoodfacts-server/api/#authentication
+const USER_AGENT = "Titan-Fitness/1.0 (+https://titan-73b02.web.app)";
+const UA_HEADERS = { "User-Agent": USER_AGENT };
+
 export async function searchUsda(queryText, key, fetchImpl = fetch) {
   const url = `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(queryText)}&pageSize=20&dataType=Branded,Foundation,SR Legacy&api_key=${key}`;
-  const res = await fetchImpl(url);
+  const res = await fetchImpl(url, { headers: UA_HEADERS });
   if (!res.ok) return [];
   const data = await res.json();
   if (!data.foods || data.foods.length === 0) return [];
@@ -120,14 +126,14 @@ export async function searchOff(queryText, fetchImpl = fetch) {
     page_size: "20",
     json: "true",
   });
-  const res = await fetchImpl(`https://us.openfoodfacts.org/api/v2/search?${params.toString()}`);
+  const res = await fetchImpl(`https://us.openfoodfacts.org/api/v2/search?${params.toString()}`, { headers: UA_HEADERS });
   if (!res.ok) return [];
   const data = await res.json();
   return (data.products || []).map(mapOffProduct);
 }
 
 export async function barcodeLookup(code, fetchImpl = fetch) {
-  const res = await fetchImpl(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+  const res = await fetchImpl(`https://world.openfoodfacts.org/api/v0/product/${code}.json`, { headers: UA_HEADERS });
   if (!res.ok) return null;
   const data = await res.json();
   if (data.status === 1 && data.product) {
