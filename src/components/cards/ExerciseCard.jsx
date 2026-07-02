@@ -72,7 +72,7 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
 
   return (
     <div className={`rounded-xl border overflow-hidden mb-3 ${isComplete ? 'bg-green-900/20 border-green-600/50' : 'bg-gray-800 border-gray-700'}`}>
-       <div onClick={() => setIsExpanded(!isExpanded)} className="p-4 flex justify-between items-center cursor-pointer">
+       <div onClick={() => setIsExpanded(!isExpanded)} role="button" tabIndex={0} aria-expanded={isExpanded} onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIsExpanded(v => !v); } }} className="p-4 flex justify-between items-center cursor-pointer">
           <div className="flex-1"><h4 className={`font-bold text-sm ${isComplete ? 'text-green-400' : 'text-white'}`}>{ex.name}</h4><div className="text-xs text-gray-500">{ex.sets} Sets • {ex.reps} {type === 'cardio' ? 'Mins' : 'Reps'}</div></div>
           <div className="flex gap-2">
             <button onClick={(e) => {e.stopPropagation(); onViewHistory(ex.name);}} className="p-2 text-gray-500 hover:text-white"><BarChart2 className="w-4 h-4"/></button>

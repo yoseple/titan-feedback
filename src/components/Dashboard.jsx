@@ -15,6 +15,7 @@ import { getLocalDate } from '../utils/date';
 import { normalizeFoodData, getBaseGramWeight, convertQuantity, getPortions, getEditingLogId } from '../domain/foodMath';
 import { useFoodLogging } from '../hooks/useFoodLogging';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { deriveUserContext, formatUserContext, formatChatMemory, parseCoachAction } from '../domain/coach';
 import { weeklyCalories } from '../domain/trends';
 import { useToast } from '../components/Toast';
@@ -77,6 +78,7 @@ const Dashboard = () => {
   const [isAiGeneratingIng, setIsAiGeneratingIng] = useState(false);
   const [isSavingRecipe, setIsSavingRecipe] = useState(false);
   const online = useOnlineStatus();
+  const { canInstall, promptInstall } = useInstallPrompt();
 
   // Food-logging flow (add / scan / edit) lives in its own hook to keep this component lean.
   const {
@@ -534,7 +536,9 @@ Request: "${msg}"
 
   return (
     <div className="flex flex-col h-dvh bg-slate-900 font-sans text-gray-100 overflow-hidden relative selection:bg-blue-500/30">
-      
+
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-[60] focus:top-2 focus:left-2 focus:bg-blue-600 focus:text-white focus:px-3 focus:py-2 focus:rounded-lg">Skip to content</a>
+
       {/* HEADER */}
       <header className="bg-black/80 backdrop-blur-md border-b border-white/10 p-4 pt-safe-top shrink-0 z-20">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
@@ -543,13 +547,18 @@ Request: "${msg}"
                   <Flame className="w-5 h-5 text-blue-500 fill-blue-500" /> TITAN
               </h1>
           </div>
-          <button
-            onClick={() => navigate('/settings')}
-            aria-label="Settings"
-            className="p-2 bg-gray-800 rounded-full text-gray-400 hover:text-white border border-gray-700 active:scale-95 transition"
-          >
-            <Settings className="w-5 h-5"/>
-          </button>
+          <div className="flex items-center gap-2">
+            {canInstall && (
+              <button onClick={promptInstall} className="px-3 py-2 text-xs font-bold rounded-full bg-blue-600 hover:bg-blue-500 text-white active:scale-95 transition">Install</button>
+            )}
+            <button
+              onClick={() => navigate('/settings')}
+              aria-label="Settings"
+              className="p-2 bg-gray-800 rounded-full text-gray-400 hover:text-white border border-gray-700 active:scale-95 transition"
+            >
+              <Settings className="w-5 h-5"/>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -576,7 +585,7 @@ Request: "${msg}"
       )}
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-24 scroll-smooth">
+      <main id="main" className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-24 scroll-smooth">
         <div className="max-w-5xl mx-auto space-y-6">
           
           {/* --- WORKOUTS TAB --- */}
@@ -812,7 +821,7 @@ Request: "${msg}"
           {/* --- COACH TAB --- */}
           {activeTab === 'coach' && (
             <div className="h-[calc(100dvh-140px)] flex flex-col animate-in fade-in duration-300">
-                <div className="flex-1 bg-gray-800 rounded-t-xl border border-gray-700 border-b-0 overflow-y-auto p-4 space-y-4 shadow-inner">
+                <div role="log" aria-live="polite" className="flex-1 bg-gray-800 rounded-t-xl border border-gray-700 border-b-0 overflow-y-auto p-4 space-y-4 shadow-inner">
                     <div className="flex justify-center mb-4"><span className="text-xs font-bold text-gray-600 bg-gray-900 px-3 py-1 rounded-full uppercase tracking-wider">Titan AI Active{chatQuota != null && ` · ${chatQuota} chats left`}</span></div>
                     {/* quick-chips are a persistent row above the composer (below) */}
                     {chatHistory.map((m, i) => (
@@ -877,7 +886,7 @@ Request: "${msg}"
             </div>
           )}
         </div>
-      </div>
+      </main>
 
       {/* QUICK-ADD FAB — one tap into logging the meal for the current time of day. Diet only
           (it's the date-scoped log surface with a visible date; Progress is rolling analytics). */}
@@ -892,20 +901,21 @@ Request: "${msg}"
       )}
 
       {/* FOOTER NAV (Fixed Bottom) */}
-      <div className="shrink-0 bg-gray-900/95 backdrop-blur-xl border-t border-gray-800 flex justify-around p-2 pb-safe-bottom z-50 shadow-2xl">
+      <nav aria-label="Primary" className="shrink-0 bg-gray-900/95 backdrop-blur-xl border-t border-gray-800 flex justify-around p-2 pb-safe-bottom z-50 shadow-2xl">
          {['workouts', 'diet', 'progress', 'coach'].map(tab => (
            <button
              key={tab}
              onClick={() => setActiveTab(tab)}
              aria-label={tab}
              aria-current={activeTab === tab ? 'page' : undefined}
-             className={`flex-1 py-3 flex flex-col items-center gap-1.5 transition active:scale-95 rounded-xl ${activeTab === tab ? 'text-blue-500' : 'text-gray-500 hover:text-gray-300'}`}
+             className={`relative flex-1 py-3 flex flex-col items-center gap-1.5 transition active:scale-95 rounded-xl ${activeTab === tab ? 'text-blue-500' : 'text-gray-500 hover:text-gray-300'}`}
            >
+             {activeTab === tab && <span className="absolute top-0.5 h-1 w-8 rounded-full bg-blue-500" />}
              {tab === 'workouts' ? <Dumbbell className="w-6 h-6"/> : tab === 'diet' ? <Utensils className="w-6 h-6"/> : tab === 'progress' ? <LineChart className="w-6 h-6"/> : <Bot className="w-6 h-6"/>}
              <span className="text-[10px] font-bold uppercase tracking-wide">{tab}</span>
            </button>
          ))}
-      </div>
+      </nav>
 
       {/* --- MODALS (Bottom Sheet Style for Mobile) --- */}
       

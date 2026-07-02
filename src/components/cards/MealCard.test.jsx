@@ -75,8 +75,8 @@ describe('MealCard', () => {
 
   it('calls onToggle from the select button without expanding the card', () => {
     const { onToggle } = setup();
-    // Collapsed state has exactly one button: the select/toggle control.
-    fireEvent.click(screen.getByRole('button'));
+    // The select control (the header is also role=button now, so target by label).
+    fireEvent.click(screen.getByRole('button', { name: /select meal/i }));
     expect(onToggle).toHaveBeenCalledTimes(1);
     // Its onClick stops propagation, so the card must stay collapsed.
     expect(screen.queryByText('Chicken Breast')).not.toBeInTheDocument();

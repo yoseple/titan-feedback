@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save, X, Trash2, Plus, GripVertical, AlertCircle } from 'lucide-react';
+import { Save, X, Trash2, Plus, AlertCircle } from 'lucide-react';
 
 const WorkoutDayEditor = ({ dayData, onSave, onCancel }) => {
   const [editedDay, setEditedDay] = useState(JSON.parse(JSON.stringify(dayData)));
@@ -61,7 +61,6 @@ const WorkoutDayEditor = ({ dayData, onSave, onCancel }) => {
             {/* Index & Type Selector Row */}
             <div className="flex justify-between items-start mb-3">
                 <div className="flex items-center gap-2">
-                    <GripVertical className="text-gray-600 w-4 h-4" />
                     <span className="text-xs font-mono text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">#{i + 1}</span>
                     <select 
                         className="bg-transparent text-xs font-bold text-blue-400 outline-none uppercase tracking-wider cursor-pointer hover:text-blue-300"
