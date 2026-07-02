@@ -4,6 +4,7 @@ import { calculateTDEE, calculateTargetCalories, computeMacroTargets } from '../
 
 const Onboarding = ({ onComplete }) => {
   const [step, setStep] = useState(1);
+  const [error, setError] = useState('');
   const [data, setData] = useState({
     weight: '',
     feet: '',
@@ -19,7 +20,18 @@ const Onboarding = ({ onComplete }) => {
   const handleFinish = () => {
     // 1. Convert Height to CM for the backend
     const heightCm = Math.round((parseInt(data.feet || 0) * 30.48) + (parseInt(data.inches || 0) * 2.54));
-    
+
+    // Validate positives before computing TDEE — otherwise calculateTDEE silently falls back
+    // to 180 lb / 25 y for blank/0 values, and a NEGATIVE age flips the BMR term, persisting
+    // a garbage calorie/macro target on the very first profile (the B14 guard, missing here).
+    const weightVal = parseFloat(data.weight);
+    const ageVal = parseFloat(data.age);
+    if (!(weightVal > 0) || !(ageVal > 0) || !(heightCm > 0)) {
+      setError('Please enter a valid age, weight, and height.');
+      return;
+    }
+    setError('');
+
     // 2. Calculate TDEE
     const tdee = calculateTDEE(data.weight, heightCm, data.age, data.gender, data.activityLevel);
     const target = calculateTargetCalories(tdee, data.goal);
@@ -71,7 +83,7 @@ const Onboarding = ({ onComplete }) => {
                   <input type="number" value={data.age} onChange={e => setData({...data, age: e.target.value})} className="w-full bg-gray-900 border border-gray-700 p-4 rounded-xl text-white outline-none focus:border-blue-500" placeholder="Years" />
                 </div>
               </div>
-              <button onClick={handleNext} disabled={!data.age} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">Next <ArrowRight size={18}/></button>
+              <button onClick={handleNext} disabled={!(parseFloat(data.age) > 0)} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">Next <ArrowRight size={18}/></button>
             </div>
           )}
 
@@ -105,7 +117,7 @@ const Onboarding = ({ onComplete }) => {
                     </div>
                  </div>
               </div>
-              <button onClick={handleNext} disabled={!data.weight || !data.feet} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">Next <ArrowRight size={18}/></button>
+              <button onClick={handleNext} disabled={!(parseFloat(data.weight) > 0) || !(parseInt(data.feet) > 0)} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">Next <ArrowRight size={18}/></button>
             </div>
           )}
 
@@ -139,6 +151,7 @@ const Onboarding = ({ onComplete }) => {
                     </select>
                  </div>
               </div>
+              {error && <div className="bg-red-900/40 text-red-300 text-sm p-3 rounded-lg border border-red-800">{error}</div>}
               <button onClick={handleFinish} className="w-full bg-red-600 hover:bg-red-500 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">Launch Titan <Activity size={18}/></button>
             </div>
           )}

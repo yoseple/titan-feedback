@@ -24,7 +24,7 @@ const ExerciseCard = ({ ex, onLog, onDeleteLog, history, date, isComplete, simpl
              };
           } else {
              const existing = prev[i];
-             if(existing && !existing.completed && (existing.weight || existing.reps || existing.duration)) {
+             if(existing && !existing.completed && (existing.weight || existing.reps || existing.duration || existing.distance)) {
                 next[i] = existing;
              }
           }

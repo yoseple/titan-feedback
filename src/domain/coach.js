@@ -67,18 +67,27 @@ export const parseCoachAction = (data) => {
   if (!data || typeof data !== 'object') return { type: 'advice', message: 'Sorry, I did not get that.' };
 
   if (data.type === 'update_plan') {
-    const updates = (Array.isArray(data.updates) ? data.updates : []).slice(0, 7).map((u) => ({
-      id: normalizeDayId(u.id || u.day),
-      day: str(u.day, 20),
-      focus: str(u.focus, 60),
-      exercises: (Array.isArray(u.exercises) ? u.exercises : []).slice(0, 12).map((ex) => ({
-        name: str(ex.name, 60),
-        sets: str(ex.sets, 10),
-        reps: str(ex.reps, 15),
-        tips: str(ex.tips, 80),
-        type: ['weighted', 'bodyweight', 'cardio'].includes(ex.type) ? ex.type : 'weighted',
-      })).filter((ex) => ex.name),
-    })).filter((u) => u.id);
+    const updates = (Array.isArray(data.updates) ? data.updates : []).slice(0, 7).map((u) => {
+      const id = normalizeDayId(u.id || u.day);
+      return {
+        id,
+        // Persist the CANONICAL Title-case weekday ("Monday"), not the raw model string.
+        // The render layer matches on toLocaleDateString({weekday:'long'}) and updateWorkoutPlan
+        // derives `order` from indexOf(day) — a raw "monday"/"Mon" would save to order=-1 and never
+        // render, silently replacing the user's real plan for that day.
+        day: id ? id.charAt(0).toUpperCase() + id.slice(1) : str(u.day, 20),
+        focus: str(u.focus, 60),
+        exercises: (Array.isArray(u.exercises) ? u.exercises : []).slice(0, 12).map((ex) => ({
+          name: str(ex.name, 60),
+          sets: str(ex.sets, 10),
+          reps: str(ex.reps, 15),
+          tips: str(ex.tips, 80),
+          type: ['weighted', 'bodyweight', 'cardio'].includes(ex.type) ? ex.type : 'weighted',
+        })).filter((ex) => ex.name),
+      };
+    // Only real weekdays — stops the model fabricating orphan docs ("push day") that
+    // can't render and that undo can't remove.
+    }).filter((u) => u.id && DAYS.includes(u.id));
     if (!updates.length) return { type: 'advice', message: "I couldn't build a valid plan update." };
     const preview = updates.map((u) => `${(u.day || u.id)} — ${u.focus || 'Workout'} (${u.exercises.length} exercises)`).join('\n');
     return { type: 'update_plan', updates, preview };

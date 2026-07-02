@@ -22,6 +22,7 @@ export function useAuth() {
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
 
   // Existing Email/Password functions (Keep these if you ever want them)
   function signup(email, password) {
@@ -65,7 +66,16 @@ export function AuthProvider({ children }) {
       .then((result) => {
         if (result?.user) track("login", { method: "google" });
       })
-      .catch((err) => console.error("Redirect sign-in failed:", err));
+      .catch((err) => {
+        // Surface the failure so the redirect flow (mobile/standalone PWAs) doesn't drop
+        // the user back on a plain login screen with zero feedback.
+        console.error("Redirect sign-in failed:", err);
+        setAuthError(
+          err?.code === "auth/account-exists-with-different-credential"
+            ? "That email is already linked to another sign-in method."
+            : "Sign-in didn't complete. Please try again."
+        );
+      });
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -77,6 +87,7 @@ export function AuthProvider({ children }) {
   const value = {
     currentUser,
     loading,
+    authError,
     signup,
     login,
     googleLogin, // <--- EXPORT THIS

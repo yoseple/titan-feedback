@@ -146,9 +146,17 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
     if(!desc) return;
     setAiLoading(true);
     const prompt = `Estimate nutrition for: "${desc}". Return strictly valid JSON: { "name": "${desc}", "calories": 0, "protein": 0, "carbs": 0, "fats": 0, "weight_amount": "1 serving" }`;
-    const data = await generateContent(prompt, 'search'); 
-    setAiLoading(false);
-    if(data) onScanFood({ ...data, isManual: true }); 
+    // generateContent RE-THROWS on quota exhaustion (unlike the searchAI wrappers), so
+    // clear the loading flag in finally — otherwise the button stays a disabled spinner
+    // forever, with no error, until the modal is remounted.
+    try {
+      const data = await generateContent(prompt, 'search');
+      if(data) onScanFood({ ...data, isManual: true });
+    } catch (e) {
+      toast(e?.message || 'AI unavailable — try again later.', 'error');
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   return (

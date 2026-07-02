@@ -168,9 +168,17 @@ const Dashboard = () => {
       if (oldUnitStr.startsWith('oz')) oldUnit = 'oz';
       if (oldUnitStr.startsWith('fl')) oldUnit = 'floz';
 
-      const baseWeight = getBaseGramWeight(oldLabel); 
-      
+      const baseWeight = getBaseGramWeight(oldLabel);
+
+      // Serving-only ingredients (no parseable gram base) can't be switched to a weight unit
+      // without inventing a base: it would relabel "1 serving" (200 cal) as "1 g" (200 cal),
+      // then a normal gram qty edit multiplies macros ~100x. Ignore the switch (mirrors the
+      // log modal, which hides weight units entirely for serving-only foods).
+      if (oldUnit === 'serving' && newUnit !== 'serving' && !baseWeight) return;
+
       let adjustedAmount = parseFloat(newValue);
+      // Blank/non-numeric qty -> keep the previous amount instead of writing "NaN <unit>".
+      if (isNaN(adjustedAmount)) adjustedAmount = oldAmount;
 
       if (newUnit !== oldUnit && (oldUnit !== 'serving' && newUnit !== 'serving')) {
            adjustedAmount = convertQuantity(oldAmount, oldUnit, newUnit, baseWeight);
@@ -199,7 +207,18 @@ const Dashboard = () => {
       setEditingMeal({ ...editingMeal, ingredients: newIngs, calories: totals.c, protein: totals.p, carbs: totals.ca, fats: totals.f });
   };
 
-  const handleSaveRecipeWrapper = () => { actions.saveRecipe(editingMeal); setEditingMeal(null); };
+  const handleSaveRecipeWrapper = async () => {
+    // Await the write (and keep the editor open on failure) so a rejected save can't
+    // silently discard the whole recipe behind a false success.
+    try {
+      await actions.saveRecipe(editingMeal);
+      setEditingMeal(null);
+      toast('Recipe saved', 'success');
+    } catch (e) {
+      console.error('Recipe save failed', e);
+      toast('Could not save recipe — check your connection and try again.', 'error');
+    }
+  };
 
   // Onboarding completion: save the profile AND seed the default 7-day workout plan so a new
   // user starts with a real, editable plan persisted in Firestore (the client-side fallback
@@ -323,6 +342,7 @@ Request: "${msg}"
                   .map(u => workouts.find(w => w.id === u.id || (w.day || '').toLowerCase() === u.id))
                   .filter(Boolean)
                   .map(w => ({ ...w }));
+              let applied = 0;
               for (const u of action.updates) {
                   await actions.updateWorkoutPlan(u.id, {
                       ...u,
@@ -330,8 +350,11 @@ Request: "${msg}"
                       day: u.day || (u.id.charAt(0).toUpperCase() + u.id.slice(1)),
                       exercises: u.exercises,
                   });
+                  // Expose undo as soon as the first day is actually overwritten, so a mid-loop
+                  // failure still leaves a restore path — but a total failure (0 writes) neither
+                  // shows a false "Applied" banner nor clobbers a prior action's undo handle.
+                  if (++applied === 1) setLastUndo({ type: 'plan', label: 'workout plan', prevDays });
               }
-              setLastUndo({ type: 'plan', label: 'workout plan', prevDays });
               setChatHistory(p => [...p, { role: 'ai', content: "✅ Applied to your Workout Plan." }]);
               setTimeout(() => setActiveTab('workouts'), 800);
           } else if (action.type === 'add_meal') {
@@ -564,7 +587,20 @@ Request: "${msg}"
                            className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white outline-none focus:border-emerald-500 transition"
                        />
                        <button
-                           onClick={() => { const w = parseFloat(weightInput); if (w > 0) { actions.saveWeight(w, formattedDate); setWeightInput(''); toast(`Logged ${w} lb`, 'success'); track('weight_logged'); } }}
+                           onClick={async () => {
+                               const w = parseFloat(weightInput);
+                               if (!(w > 0)) return;
+                               // Await the write so a rejected save can't fire a false "Logged" toast.
+                               try {
+                                   await actions.saveWeight(w, formattedDate);
+                                   setWeightInput('');
+                                   toast(`Logged ${w} lb`, 'success');
+                                   track('weight_logged');
+                               } catch (e) {
+                                   console.error('Weight save failed', e);
+                                   toast('Could not save weight — try again.', 'error');
+                               }
+                           }}
                            disabled={!(parseFloat(weightInput) > 0)}
                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-5 rounded-xl font-bold active:scale-95 transition"
                        >
@@ -886,7 +922,11 @@ Request: "${msg}"
                                 if (unitStr.startsWith('g')) unit = 'g';
                                 else if (unitStr.startsWith('oz')) unit = 'oz';
                                 else if (unitStr.startsWith('fl')) unit = 'floz';
-                                
+
+                                // Only offer weight units when this ingredient has a real gram
+                                // base — otherwise a serving->g switch mislabels + blows up macros.
+                                const ingBase = getBaseGramWeight(ing.weight || "1 serving");
+
                                 return (
                                     <div key={i} className="flex flex-col gap-3 p-4 bg-slate-700/30 rounded-xl border border-white/5 shadow-sm">
                                         <div className="flex justify-between items-start">
@@ -948,11 +988,16 @@ Request: "${msg}"
                                                 {/* Keep 'serving' as a real option: the resolved unit defaults to
                                                     'serving' for serving-only ingredients, and a controlled
                                                     <select value='serving'> with no matching option corrupts the
-                                                    ingredient on the next change. */}
+                                                    ingredient on the next change. Weight units only when there's
+                                                    a gram base (else the switch would blow the macros up ~100x). */}
                                                 <option value="serving">Serving</option>
-                                                <option value="g">Grams</option>
-                                                <option value="oz">Ounces</option>
-                                                <option value="floz">Fl Oz</option>
+                                                {ingBase && (
+                                                  <>
+                                                    <option value="g">Grams</option>
+                                                    <option value="oz">Ounces</option>
+                                                    <option value="floz">Fl Oz</option>
+                                                  </>
+                                                )}
                                             </select>
                                         </div>
                                     </div>

@@ -56,8 +56,11 @@ export const getSuggestions = async (searchQuery) => {
   }
 };
 
-// saveToCache removed — the server-side `searchFood` callable now writes food_cache
-// via the Admin SDK; Firestore rules make food_cache client read-only (no poisoning).
+// saveToCache removed. NOTE: nothing writes food_cache anymore — the Cloudflare Worker
+// deliberately dropped the Firestore cache write (it has no Firestore), and the old
+// searchFood Cloud Function is gone. getSuggestions above therefore only ever surfaces
+// legacy cached rows (usually none) and degrades to [] — the "Popular / Cached" strip
+// is effectively dormant. Deep search ("Go") + "Recent" (food_history) are the live paths.
 
 // --- 2. BARCODE SEARCH (server-proxied, keyless OFF lookup) ---
 export const searchByBarcode = async (barcode) => {
@@ -89,8 +92,8 @@ export const searchAI = async (query) => {
 };
 
 // --- 4. EXTERNAL FOOD SEARCH (server-proxied USDA + OpenFoodFacts) ---
-// The USDA key, fetching, and kcal/per-100g normalization now live in the
-// `searchFood` Cloud Function. These are thin callable wrappers.
+// The USDA key, fetching, and kcal/per-100g normalization live in the Cloudflare Worker
+// `/food` route. These are thin wrappers over that call.
 export const searchAllFood = async (query) => rankFoodResults(await callSearchFood({ mode: 'search', query }), query);
 
 // Kept for the recipe editor's database-search flow (same server search).

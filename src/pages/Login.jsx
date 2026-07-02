@@ -7,7 +7,7 @@ import { track } from '../lib/analytics';
 export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { googleLogin, currentUser } = useAuth(); // Destructure currentUser
+  const { googleLogin, currentUser, authError } = useAuth(); // Destructure currentUser + redirect error
   const navigate = useNavigate();
 
   // FIX: Watch for currentUser changes. 
@@ -51,7 +51,7 @@ export default function Login() {
           Operator Access Terminal
         </p>
         
-        {error && <div className="bg-red-900/50 text-red-200 p-3 rounded mb-4 text-sm border border-red-700">{error}</div>}
+        {(error || authError) && <div className="bg-red-900/50 text-red-200 p-3 rounded mb-4 text-sm border border-red-700">{error || authError}</div>}
 
         {/* GOOGLE BUTTON */}
         <button 

@@ -6,10 +6,12 @@ const LiftHistoryModal = ({ exerciseName, history, onClose }) => {
     if (!history) return [];
     return history
       .filter(h => h.exercise === exerciseName)
-      // Sort by Timestamp (createdAt) if available to preserve order of multiple sets in one day
+      // Sort by the field actually written (`timestamp`, not `createdAt`) so multiple sets
+      // logged on the same day keep their real order; fall back to the day string parsed at
+      // NOON-local to avoid a UTC day-shift (matches getWeekday below).
       .sort((a, b) => {
-          const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.date).getTime();
-          const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.date).getTime();
+          const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : new Date(`${a.date}T12:00:00`).getTime();
+          const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : new Date(`${b.date}T12:00:00`).getTime();
           return tA - tB;
       });
   }, [history, exerciseName]);

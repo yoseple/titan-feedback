@@ -42,7 +42,10 @@ export const useTitanData = () => {
     const unsubWorkouts = onSnapshot(query(workoutsRef, orderBy('order')), (snap) => setWorkouts(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubLogs = onSnapshot(query(logsRef, orderBy('timestamp', 'desc'), limit(100)), (snap) => setWorkoutLogs(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubWeight = onSnapshot(query(weightRef, orderBy('date', 'desc'), limit(30)), (snap) => setWeightLog(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const unsubFood = onSnapshot(query(foodRef, orderBy('timestamp', 'desc'), limit(200)), (snap) => setFoodLog(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    // Window the food-log history generously so heavy loggers can still browse older days
+    // and see full weekly/28-day trends (200 was only ~25 days at ~8 logs/day). A per-date
+    // range query would be the O(1) fix; 1000 covers months and is the low-risk choice.
+    const unsubFood = onSnapshot(query(foodRef, orderBy('timestamp', 'desc'), limit(1000)), (snap) => setFoodLog(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubMeals = onSnapshot(mealsRef, (snap) => setCustomMeals(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubHistory = onSnapshot(query(historyRef, orderBy('lastUsed', 'desc'), limit(20)), (snap) => {
         setFoodHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -64,7 +67,11 @@ export const useTitanData = () => {
     saveFood: async (foodData, dateStr, mealType) => {
         if(!user) return;
         await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), { ...foodData, date: dateStr, mealType, timestamp: serverTimestamp() });
-        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_history'), { ...foodData, lastUsed: serverTimestamp() });
+        // Upsert food_history by a name-derived id so re-logging the same food refreshes its
+        // recency IN PLACE instead of appending a duplicate every time — otherwise "Recent"
+        // fills with copies of one staple and the collection grows unbounded.
+        const slug = String(foodData.name || 'item').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'item';
+        await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_history', slug), { ...foodData, lastUsed: serverTimestamp() }, { merge: true });
     },
     updateFood: async (id, foodData, dateStr, mealType) => {
         if(!user) return;

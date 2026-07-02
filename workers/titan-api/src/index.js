@@ -22,6 +22,20 @@ function json(body, status, cors) {
   });
 }
 
+// Lightweight per-uid/day counter for the non-AI routes (food/ticket). Kept separate
+// from the AI quota accounting (quota.js) so it doesn't perturb that tested shape.
+// Non-atomic read-modify-write (last-write-wins), acceptable as an abuse ceiling — it
+// stops a single authenticated account from exhausting the shared USDA key or spamming
+// GitHub issues / unbounded KV. Returns true if the call is allowed (and charges it).
+async function underDailyLimit(kv, prefix, uid, limit) {
+  const key = `${prefix}:${uid}:${dayKey()}`;
+  const raw = await kv.get(key);
+  const n = raw ? parseInt(raw, 10) || 0 : 0;
+  if (n >= limit) return false;
+  await kv.put(key, String(n + 1), { expirationTtl: 60 * 60 * 48 });
+  return true;
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin");
@@ -65,7 +79,7 @@ export default {
     // Dispatch. Any unexpected throw becomes a JSON 500, never a bare crash.
     try {
       if (pathname === "/ai") return await handleAi(body, env, user, cors);
-      if (pathname === "/food") return await handleFoodRoute(body, env, cors);
+      if (pathname === "/food") return await handleFoodRoute(body, env, user, cors);
       if (pathname === "/ticket") return await handleTicket(body, env, user, cors);
       return json({ error: "not_found" }, 404, cors);
     } catch {
@@ -109,7 +123,12 @@ async function handleAi(body, env, user, cors) {
 }
 
 // POST /food
-async function handleFoodRoute(body, env, cors) {
+async function handleFoodRoute(body, env, user, cors) {
+  // Bound how many uncached upstream (USDA/OFF) calls one account can make per day so a
+  // single user can't exhaust the shared USDA key and degrade search for everyone.
+  if (!(await underDailyLimit(env.TITAN_KV, "frate", user.uid, 300))) {
+    return json({ error: "resource-exhausted", results: [] }, 429, cors);
+  }
   const result = await handleFood(body, env);
   return json(result, 200, cors);
 }
@@ -121,7 +140,14 @@ async function handleTicket(body, env, user, cors) {
   const type = ["bug", "feedback"].includes(body?.type) ? body.type : "feedback";
   if (!subject || !message) return json({ error: "invalid-argument" }, 400, cors);
 
-  // Store PII mapping privately in KV; keep it OUT of the public GitHub issue.
+  // Cap tickets/day/account so a single user can't spam public GitHub issues (tripping
+  // the token's secondary rate limit) or accumulate unbounded KV records.
+  if (!(await underDailyLimit(env.TITAN_KV, "trate", user.uid, 20))) {
+    return json({ error: "resource-exhausted" }, 429, cors);
+  }
+
+  // Store PII mapping privately in KV; keep it OUT of the public GitHub issue. Expire the
+  // record after 90 days so ticket:* keys don't accumulate forever.
   const ticketId = crypto.randomUUID();
   const record = {
     uid: user.uid,
@@ -131,7 +157,7 @@ async function handleTicket(body, env, user, cors) {
     type,
     createdAt: new Date().toISOString(),
   };
-  await env.TITAN_KV.put(`ticket:${ticketId}`, JSON.stringify(record));
+  await env.TITAN_KV.put(`ticket:${ticketId}`, JSON.stringify(record), { expirationTtl: 60 * 60 * 24 * 90 });
 
   try {
     const { url } = await fileIssue({ subject, message, type, ticketId, token: env.GITHUB_TOKEN });

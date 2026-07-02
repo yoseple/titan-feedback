@@ -60,7 +60,10 @@ export function validateClaims(payload, projectId, nowSeconds) {
   if (payload.iss !== expectedIss) throw new Error("Invalid token issuer");
   if (payload.aud !== projectId) throw new Error("Invalid token audience");
   if (typeof payload.exp !== "number" || payload.exp <= nowSeconds) throw new Error("Token expired");
-  if (typeof payload.iat !== "number" || payload.iat > nowSeconds) throw new Error("Token issued in the future");
+  // Allow 300s of clock skew on iat (reference verifiers do too): the Cloudflare edge
+  // clock can trail Google's mint clock across a second boundary and reject a valid,
+  // freshly-issued token, surfacing as intermittent 401s right after sign-in/refresh.
+  if (typeof payload.iat !== "number" || payload.iat > nowSeconds + 300) throw new Error("Token issued in the future");
   if (!payload.sub || typeof payload.sub !== "string") throw new Error("Token missing subject");
   return { uid: payload.sub, email: payload.email };
 }

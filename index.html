@@ -5,7 +5,9 @@
     <link rel="icon" type="image/png" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="mask-icon" href="/masked-icon.svg" color="#3b82f6" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- Keep pinch-zoom enabled (WCAG 1.4.4) — this is a numbers-dense app; do NOT add
+         maximum-scale/user-scalable=no (Android honors them and blocks low-vision zoom). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#111827" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

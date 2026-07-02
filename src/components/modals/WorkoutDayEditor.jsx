@@ -3,6 +3,18 @@ import { Save, X, Trash2, Plus, GripVertical, AlertCircle } from 'lucide-react';
 
 const WorkoutDayEditor = ({ dayData, onSave, onCancel }) => {
   const [editedDay, setEditedDay] = useState(JSON.parse(JSON.stringify(dayData)));
+  const [error, setError] = useState('');
+
+  // Exercises are identified by NAME everywhere (React key, the workout_logs `exercise`
+  // field, completion counting), so blank or duplicate names collide — one card vanishes
+  // and sets/completion bleed onto the wrong exercise. Enforce non-blank + unique on save.
+  const handleSave = () => {
+    const names = editedDay.exercises.map((e) => (e.name || '').trim().toLowerCase());
+    if (names.some((n) => !n)) { setError('Every exercise needs a name.'); return; }
+    if (names.some((n, i) => names.indexOf(n) !== i)) { setError('Each exercise needs a unique name.'); return; }
+    setError('');
+    onSave(editedDay);
+  };
 
   const updateExercise = (idx, field, val) => { 
     const newEx = [...editedDay.exercises]; 
@@ -36,9 +48,11 @@ const WorkoutDayEditor = ({ dayData, onSave, onCancel }) => {
         </div>
         <div className="flex gap-2">
           <button onClick={onCancel} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg font-bold text-xs uppercase tracking-wider transition">Cancel</button>
-          <button onClick={() => onSave(editedDay)} className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-lg font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-amber-900/20 transition active:scale-95"><Save className="w-4 h-4"/> Save Changes</button>
+          <button onClick={handleSave} className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-lg font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-amber-900/20 transition active:scale-95"><Save className="w-4 h-4"/> Save Changes</button>
         </div>
       </div>
+
+      {error && <div className="px-4 py-2 bg-red-900/30 text-red-300 text-xs font-bold border-b border-red-800">{error}</div>}
 
       {/* --- EXERCISE LIST --- */}
       <div className="p-4 space-y-3">

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Loader } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -23,6 +23,17 @@ const PrivateRoute = ({ children }) => {
   return currentUser ? children : <Navigate to="/login" replace />;
 };
 
+// Close Settings through the router (not window.history.back(), which exits the app when
+// /settings is loaded directly — PWA reload, SW update, or a deep link/bookmark).
+const SettingsRoute = () => {
+  const navigate = useNavigate();
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <Settings onClose={() => navigate('/', { replace: true })} />
+    </div>
+  );
+};
+
 function App() {
   return (
     <ErrorBoundary>
@@ -42,16 +53,18 @@ function App() {
             } 
           />
           
-          <Route 
-             path="/settings" 
+          <Route
+             path="/settings"
              element={
                <PrivateRoute>
-                 <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-                   <Settings onClose={() => window.history.back()} />
-                 </div>
+                 <SettingsRoute />
                </PrivateRoute>
-             } 
+             }
           />
+
+          {/* Any unknown path resolves to a real screen (PrivateRoute then bounces to /login
+              if signed out) instead of rendering a blank white page. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </Suspense>
       </AuthProvider>

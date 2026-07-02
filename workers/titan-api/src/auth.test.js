@@ -87,7 +87,7 @@ describe("validateClaims", () => {
   });
 
   it("rejects a future iat", () => {
-    expect(() => validateClaims(goodPayload({ iat: NOW + 100 }), PROJECT, NOW)).toThrow(/future/);
+    expect(() => validateClaims(goodPayload({ iat: NOW + 400 }), PROJECT, NOW)).toThrow(/future/);
   });
 
   it("rejects a missing subject", () => {

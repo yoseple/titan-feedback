@@ -17,6 +17,7 @@ export default function Settings({ onClose }) {
   const [feet, setFeet] = useState('');
   const [inches, setInches] = useState('');
   const [macros, setMacros] = useState(null); // editable daily P/C/F targets
+  const [macrosDirty, setMacrosDirty] = useState(false); // true only once the user hand-edits a macro
 
   // --- TICKET STATE ---
   const [ticket, setTicket] = useState({ subject: '', message: '', type: 'feedback' });
@@ -35,7 +36,10 @@ export default function Settings({ onClose }) {
               setFeet(Math.floor(totalInches / 12));
               setInches(Math.round(totalInches % 12));
            }
-           if (data.macroTargets) setMacros(data.macroTargets);
+           // Legacy profiles saved before macrosCustom existed have no flag — treat their saved
+           // macroTargets as custom (matches the old "always honor saved macros" behavior) so a
+           // no-edit save can't silently overwrite them. Only an explicit false lets Save recompute.
+           if (data.macroTargets) { setMacros(data.macroTargets); setMacrosDirty(data.macrosCustom !== false); }
            else if (data.caloriesTarget) setMacros(computeMacroTargets(data.caloriesTarget, data.goal, data.weight));
         }
       } catch (e) {
@@ -76,9 +80,12 @@ export default function Settings({ onClose }) {
       const tdee = calculateTDEE(formData.weight, heightCm, formData.age, formData.gender, formData.activityLevel);
       const target = calculateTargetCalories(tdee, formData.goal);
       const recommended = computeMacroTargets(target, formData.goal, formData.weight);
-      // Honor manual macro edits; fall back to recommended for any blank field.
-      const macroTargets = macros
-        ? { protein: Number(macros.protein) || recommended.protein, carbs: Number(macros.carbs) || recommended.carbs, fats: Number(macros.fats) || recommended.fats, fiber: recommended.fiber }
+      // "Save & Recalculate" recomputes macros from the (possibly changed) body metrics —
+      // UNLESS the user hand-edited them this session, in which case honor their values.
+      // Preserve an explicit 0 (keto/zero-fat): only blank/NaN falls back to recommended.
+      const num = (v) => (v === '' || v == null || Number.isNaN(Number(v))) ? null : Number(v);
+      const macroTargets = (macrosDirty && macros)
+        ? { protein: num(macros.protein) ?? recommended.protein, carbs: num(macros.carbs) ?? recommended.carbs, fats: num(macros.fats) ?? recommended.fats, fiber: recommended.fiber }
         : recommended;
 
       const payload = {
@@ -87,6 +94,9 @@ export default function Settings({ onClose }) {
           tdee,
           caloriesTarget: target,
           macroTargets,
+          // Remember whether these macros are user-set so a later Save (after a weight change)
+          // recomputes auto macros but never clobbers intentional custom ones.
+          macrosCustom: macrosDirty,
           updatedAt: new Date().toISOString()
       };
 
@@ -207,13 +217,13 @@ export default function Settings({ onClose }) {
             <div className="pt-1">
                 <div className="flex justify-between items-center mb-2">
                     <label className="block text-xs font-bold text-gray-400 uppercase">Daily Macro Targets</label>
-                    <button type="button" onClick={() => setMacros(recommendedMacros())} className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide hover:text-emerald-300">Reset to recommended</button>
+                    <button type="button" onClick={() => { setMacros(recommendedMacros()); setMacrosDirty(false); }} className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide hover:text-emerald-300">Reset to recommended</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                     {[['protein','Protein','text-blue-400'],['carbs','Carbs','text-orange-400'],['fats','Fats','text-yellow-400']].map(([key,label,color]) => (
                         <div key={key} className="bg-gray-900 border border-gray-700 rounded-xl p-3">
                             <div className={`text-[10px] font-bold uppercase ${color} mb-1`}>{label} (g)</div>
-                            <input type="number" inputMode="numeric" value={macros?.[key] ?? ''} onChange={e => setMacros(m => ({ ...(m || recommendedMacros()), [key]: e.target.value }))} className="w-full bg-transparent text-white text-lg font-bold outline-none" placeholder="0" />
+                            <input type="number" inputMode="numeric" value={macros?.[key] ?? ''} onChange={e => { setMacrosDirty(true); setMacros(m => ({ ...(m || recommendedMacros()), [key]: e.target.value })); }} className="w-full bg-transparent text-white text-lg font-bold outline-none" placeholder="0" />
                         </div>
                     ))}
                 </div>
