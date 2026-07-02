@@ -14,6 +14,7 @@ import { categorizeFood, searchUSDA, searchAI, computeMacroTargets } from '../ut
 import { getLocalDate } from '../utils/date';
 import { normalizeFoodData, getBaseGramWeight, convertQuantity, getPortions, getEditingLogId } from '../domain/foodMath';
 import { useFoodLogging } from '../hooks/useFoodLogging';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { deriveUserContext, formatUserContext, formatChatMemory, parseCoachAction } from '../domain/coach';
 import { weeklyCalories } from '../domain/trends';
 import { useToast } from '../components/Toast';
@@ -74,12 +75,14 @@ const Dashboard = () => {
   const [isEditorSearching, setIsEditorSearching] = useState(false);
   const [swappingIngIndex, setSwappingIngIndex] = useState(null); 
   const [isAiGeneratingIng, setIsAiGeneratingIng] = useState(false);
+  const [isSavingRecipe, setIsSavingRecipe] = useState(false);
+  const online = useOnlineStatus();
 
   // Food-logging flow (add / scan / edit) lives in its own hook to keep this component lean.
   const {
     addingToMeal, setAddingToMeal, scannedResult, setScannedResult,
     numServings, setNumServings, servingUnit, setServingUnit,
-    calculationData, handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog, quickLog,
+    saving, calculationData, handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog, quickLog,
   } = useFoodLogging({
     actions,
     viewDate,
@@ -103,9 +106,28 @@ const Dashboard = () => {
   const [lastUndo, setLastUndo] = useState(null);
   const chatEndRef = useRef(null);
 
-  useEffect(() => { 
-    if (activeTab === 'coach') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
+  useEffect(() => {
+    if (activeTab === 'coach') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, activeTab]);
+
+  // Esc closes the top-most open overlay (basic dialog behavior for the sheets/modals).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      // Don't close a modal (losing its unsaved form content) when Esc is pressed just to
+      // dismiss the keyboard while typing — only act when focus isn't in a text field.
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (scannedResult) { setScannedResult(null); setAddingToMeal(null); }
+      else if (isFoodSearching) { setIsFoodSearching(false); setSwappingIngIndex(null); }
+      else if (editingMeal) setEditingMeal(null);
+      else if (chefMeal) setChefMeal(null);
+      else if (showLiftHistory) setShowLiftHistory(null);
+      else if (addingToMeal) setAddingToMeal(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [scannedResult, isFoodSearching, editingMeal, chefMeal, showLiftHistory, addingToMeal, setScannedResult, setAddingToMeal]);
 
   // --- RECIPE EDITOR LOGIC ---
   const handleEditorSearch = async () => {
@@ -215,7 +237,9 @@ const Dashboard = () => {
 
   const handleSaveRecipeWrapper = async () => {
     // Await the write (and keep the editor open on failure) so a rejected save can't
-    // silently discard the whole recipe behind a false success.
+    // silently discard the whole recipe behind a false success. Guard double-submit.
+    if (isSavingRecipe) return;
+    setIsSavingRecipe(true);
     try {
       await actions.saveRecipe(editingMeal);
       setEditingMeal(null);
@@ -223,7 +247,21 @@ const Dashboard = () => {
     } catch (e) {
       console.error('Recipe save failed', e);
       toast('Could not save recipe — check your connection and try again.', 'error');
+    } finally {
+      setIsSavingRecipe(false);
     }
+  };
+
+  // Destructive deletes go through an optimistic remove + an Undo toast so an accidental
+  // tap is one tap to recover (nothing is truly lost for the toast's lifetime).
+  const handleDeleteFood = (f) => {
+    actions.deleteFood(f.id);
+    toast(`Deleted ${f.name}`, 'info', 6000, { label: 'Undo', onClick: () => actions.restoreFood(f) });
+  };
+  const handleDeleteRecipe = (meal) => {
+    const { id, ...rest } = meal;
+    actions.deleteRecipe(id);
+    toast(`Deleted ${meal.name || 'recipe'}`, 'info', 6000, { label: 'Undo', onClick: () => actions.saveRecipe(rest) });
   };
 
   // Onboarding completion: save the profile AND seed the default 7-day workout plan so a new
@@ -468,14 +506,22 @@ Request: "${msg}"
                   <Flame className="w-5 h-5 text-blue-500 fill-blue-500" /> TITAN
               </h1>
           </div>
-          <button 
-            onClick={() => navigate('/settings')} 
+          <button
+            onClick={() => navigate('/settings')}
+            aria-label="Settings"
             className="p-2 bg-gray-800 rounded-full text-gray-400 hover:text-white border border-gray-700 active:scale-95 transition"
           >
             <Settings className="w-5 h-5"/>
           </button>
         </div>
       </header>
+
+      {/* Offline banner — writes queue in the local cache and flush on reconnect. */}
+      {!online && (
+        <div className="bg-amber-500 text-black text-[11px] font-bold text-center py-1.5 shrink-0 z-30">
+          Offline — your changes will sync when you reconnect
+        </div>
+      )}
 
       {/* DATE NAVIGATION — only on the per-day tabs (Workouts + the Diet log). Progress is
           rolling analytics and Coach is a chat, so it's hidden there (dead control otherwise). */}
@@ -519,7 +565,7 @@ Request: "${msg}"
                               <ExerciseCard 
                                 key={ex.name} 
                                 ex={ex} 
-                                onLog={(n,w,r,d,dur) => actions.saveWorkoutLog({exercise:n, weight:Number(w), reps:Number(r), distance:Number(d), duration:Number(dur)}, formattedDate)} 
+                                onLog={async (n,w,r,d,dur) => { try { await actions.saveWorkoutLog({exercise:n, weight:Number(w), reps:Number(r), distance:Number(d), duration:Number(dur)}, formattedDate); } catch (e) { console.error('Set log failed', e); toast('Could not log that set — try again.', 'error'); } }}
                                 onDeleteLog={actions.deleteWorkoutLog} 
                                 history={workoutLogs} 
                                 date={formattedDate} 
@@ -579,7 +625,7 @@ Request: "${msg}"
                                            </div>
                                            <div className="flex items-center gap-1 shrink-0">
                                                <button aria-label="Edit entry" onClick={() => handleEditLog(f)} className="text-gray-500 hover:text-blue-400 p-3 active:scale-90"><Edit2 className="w-4 h-4"/></button>
-                                               <button aria-label="Delete entry" onClick={() => actions.deleteFood(f.id)} className="text-gray-500 hover:text-red-500 p-3 active:scale-90"><Trash2 className="w-4 h-4"/></button>
+                                               <button aria-label="Delete entry" onClick={() => handleDeleteFood(f)} className="text-gray-500 hover:text-red-500 p-3 active:scale-90"><Trash2 className="w-4 h-4"/></button>
                                            </div>
                                        </div>
                                    ))}
@@ -606,7 +652,7 @@ Request: "${msg}"
                        ) : (
                            <div className="grid md:grid-cols-2 gap-4">
                                {allMeals.map((meal, i) => (
-                                   <MealCard key={meal.id || i} meal={meal} isSelected={selectedMealIds.includes(meal.id)} onToggle={() => setSelectedMealIds(p => p.includes(meal.id) ? p.filter(x=>x!==meal.id) : [...p, meal.id])} onChefMode={setChefMeal} onEdit={setEditingMeal} onDelete={actions.deleteRecipe} />
+                                   <MealCard key={meal.id || i} meal={meal} isSelected={selectedMealIds.includes(meal.id)} onToggle={() => setSelectedMealIds(p => p.includes(meal.id) ? p.filter(x=>x!==meal.id) : [...p, meal.id])} onChefMode={setChefMeal} onEdit={setEditingMeal} onDelete={() => handleDeleteRecipe(meal)} />
                                ))}
                            </div>
                        )}
@@ -920,8 +966,8 @@ Request: "${msg}"
               </div>
 
               <div className="p-4 bg-slate-900 border-t border-slate-700 pb-safe-bottom">
-                  <button onClick={handleScanConfirm} disabled={!(Number(numServings) > 0)} className="w-full bg-emerald-600 active:bg-emerald-700 disabled:opacity-40 disabled:active:scale-100 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex justify-center items-center gap-2 transition active:scale-95">
-                      <Check size={24} /> {getEditingLogId(scannedResult) ? 'Update Log' : 'Log Food'}
+                  <button onClick={handleScanConfirm} disabled={saving || !(Number(numServings) > 0)} className="w-full bg-emerald-600 active:bg-emerald-700 disabled:opacity-40 disabled:active:scale-100 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex justify-center items-center gap-2 transition active:scale-95">
+                      {saving ? <Loader className="w-6 h-6 animate-spin"/> : <><Check size={24} /> {getEditingLogId(scannedResult) ? 'Update Log' : 'Log Food'}</>}
                   </button>
               </div>
            </div>
@@ -964,7 +1010,7 @@ Request: "${msg}"
                     <div>
                         <div className="flex justify-between items-center mb-3">
                             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Ingredients ({editingMeal.ingredients?.length || 0})</span>
-                            <button onClick={() => setIsFoodSearching(true)} className="text-xs font-bold text-emerald-500 flex items-center gap-1 bg-emerald-500/10 px-3 py-2 rounded-lg active:scale-95 border border-emerald-500/20 hover:bg-emerald-500/20 transition">
+                            <button onClick={() => { setSwappingIngIndex(null); setIsFoodSearching(true); }} className="text-xs font-bold text-emerald-500 flex items-center gap-1 bg-emerald-500/10 px-3 py-2 rounded-lg active:scale-95 border border-emerald-500/20 hover:bg-emerald-500/20 transition">
                                 <Plus size={14}/> Add Item
                             </button>
                         </div>
@@ -1084,8 +1130,8 @@ Request: "${msg}"
                 
                 {/* Save Button */}
                 <div className="p-4 bg-slate-900 border-t border-slate-700 pb-safe-bottom">
-                    <button onClick={handleSaveRecipeWrapper} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition hover:bg-emerald-500 flex justify-center items-center gap-2">
-                        <Check size={20}/> Save Recipe
+                    <button onClick={handleSaveRecipeWrapper} disabled={isSavingRecipe} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition hover:bg-emerald-500 disabled:opacity-60 flex justify-center items-center gap-2">
+                        {isSavingRecipe ? <Loader className="w-5 h-5 animate-spin"/> : <><Check size={20}/> Save Recipe</>}
                     </button>
                 </div>
             </div>
@@ -1110,7 +1156,7 @@ Request: "${msg}"
                   <button onClick={handleEditorSearch} disabled={isEditorSearching} className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-sm min-w-[60px] flex items-center justify-center">
                     {isEditorSearching ? <Loader className="w-4 h-4 animate-spin"/> : 'Go'}
                   </button>
-                  <button onClick={() => setIsFoodSearching(false)} className="text-gray-400 p-2"><X size={24}/></button>
+                  <button aria-label="Close search" onClick={() => { setIsFoodSearching(false); setSwappingIngIndex(null); }} className="text-gray-400 p-2"><X size={24}/></button>
               </div>
               
               <div className="flex-1 overflow-y-auto p-2 space-y-2">

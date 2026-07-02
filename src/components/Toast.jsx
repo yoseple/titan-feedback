@@ -14,10 +14,13 @@ export function ToastProvider({ children }) {
 
   const dismiss = useCallback((id) => setToasts((t) => t.filter((x) => x.id !== id)), []);
 
-  const toast = useCallback((message, type = 'info', duration = 3200) => {
+  // action (optional): { label, onClick } renders an inline button (e.g. Undo). Toasts with
+  // an action get a longer default lifetime so the user has time to act.
+  const toast = useCallback((message, type = 'info', duration, action = null) => {
     const id = ++idCounter;
-    setToasts((t) => [...t, { id, message, type }]);
-    if (duration) setTimeout(() => dismiss(id), duration);
+    setToasts((t) => [...t, { id, message, type, action }]);
+    const ttl = duration ?? (action ? 6000 : 3200);
+    if (ttl) setTimeout(() => dismiss(id), ttl);
     return id;
   }, [dismiss]);
 
@@ -42,6 +45,14 @@ export function ToastProvider({ children }) {
             >
               <Icon className="w-5 h-5 shrink-0 mt-0.5" />
               <span className="text-sm text-gray-100 flex-1 whitespace-pre-line">{t.message}</span>
+              {t.action && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); t.action.onClick(); dismiss(t.id); }}
+                  className="text-xs font-bold uppercase tracking-wide text-blue-300 hover:text-blue-200 shrink-0 px-1"
+                >
+                  {t.action.label}
+                </button>
+              )}
               <X className="w-4 h-4 text-gray-500 shrink-0" />
             </div>
           );

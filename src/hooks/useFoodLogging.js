@@ -14,6 +14,7 @@ export function useFoodLogging({ actions, viewDate, onLogged, onError }) {
   const [scannedResult, setScannedResult] = useState(null);
   const [numServings, setNumServings] = useState(1);
   const [servingUnit, setServingUnit] = useState('serving'); // 'serving' | 'g' | 'oz' | 'floz'
+  const [saving, setSaving] = useState(false); // in-flight guard for the confirm write
 
   const handleFoodSelect = (foodItem) => {
     const clean = normalizeFoodData(foodItem);
@@ -47,9 +48,10 @@ export function useFoodLogging({ actions, viewDate, onLogged, onError }) {
 
   const handleScanConfirm = async () => {
     const basis = scannedResult?.basis;
-    if (!basis) return;
+    if (!basis || saving) return;
     // Guard against a 0/blank amount (cleared input) writing a 0-cal ghost log.
     if (!(Number(numServings) > 0)) return;
+    setSaving(true);
     // Store the immutable basis + amount (+ recomputed totals). Editing later just reloads
     // the base and re-applies the amount — no reverse-engineering, no compounding labels.
     const payload = buildFoodLog(basis, numServings, servingUnit, { name: scannedResult.name || 'Unknown Food' });
@@ -64,9 +66,11 @@ export function useFoodLogging({ actions, viewDate, onLogged, onError }) {
       if (editingLogId) await actions.updateFood(editingLogId, payload, dateStr, mealType);
       else await actions.saveFood(payload, dateStr, mealType);
     } catch (err) {
+      setSaving(false);
       if (onError) onError(err, payload);
       return; // keep the modal open; do NOT clear state or report success
     }
+    setSaving(false);
     if (onLogged) onLogged(payload, !!editingLogId);
     setScannedResult(null);
     setAddingToMeal(null);
@@ -108,6 +112,7 @@ export function useFoodLogging({ actions, viewDate, onLogged, onError }) {
     scannedResult, setScannedResult,
     numServings, setNumServings,
     servingUnit, setServingUnit,
+    saving,
     calculationData,
     handleFoodSelect, handleUnitChange, handleScanConfirm, handleEditLog, quickLog,
   };

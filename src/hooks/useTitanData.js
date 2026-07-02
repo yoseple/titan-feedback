@@ -80,6 +80,13 @@ export const useTitanData = () => {
         await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id), { ...foodData, date: dateStr, mealType });
     },
     deleteFood: async (id) => { if(user) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'food_logs', id)); },
+    // Re-create a just-deleted food log (for undo). Strips the old id + timestamp so it's a
+    // fresh doc; the immutable basis + totals are preserved exactly.
+    restoreFood: async (logDoc) => {
+        if(!user || !logDoc) return;
+        const { id, timestamp, ...rest } = logDoc;
+        await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'food_logs'), { ...rest, timestamp: serverTimestamp() });
+    },
     
     saveRecipe: async (mealData) => {
         if(!user) return null;

@@ -113,6 +113,8 @@ const AddFoodModal = ({ mealType, onClose, onAddFood, onScanFood, onDeleteHistor
       const result = await searchAI(query);
       if (result) {
           setWebResults(prev => [result, ...prev]);
+      } else {
+          toast("Couldn't estimate that — try a more specific description.", 'error');
       }
       setIsAiGenerating(false);
   };
