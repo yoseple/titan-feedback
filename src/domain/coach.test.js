@@ -80,6 +80,63 @@ describe('parseCoachAction — validates + bounds untrusted AI output', () => {
   });
 });
 
+describe('parseCoachAction — coach_note (spoken coaching line on an action)', () => {
+  it('update_plan: returns note === coach_note and preview lists the exercise name(s)', () => {
+    const a = parseCoachAction({
+      type: 'update_plan',
+      coach_note: "Let's rebuild your Monday around compound presses.",
+      updates: [{ day: 'Monday', focus: 'Chest', exercises: [
+        { name: 'Barbell Bench', sets: '4', reps: '8' },
+        { name: 'Incline DB Press', sets: '3', reps: '10' },
+      ] }],
+    });
+    expect(a.type).toBe('update_plan');
+    expect(a.note).toBe("Let's rebuild your Monday around compound presses.");
+    expect(a.preview).toContain('Barbell Bench');
+    expect(a.preview).toContain('Incline DB Press');
+  });
+
+  it('add_meal: returns note and preview lists ingredient name(s) plus the "<cal> cal" summary', () => {
+    const a = parseCoachAction({
+      type: 'add_meal',
+      coach_note: 'Great high-protein lunch to hit your target.',
+      data: { name: 'Chicken Rice Bowl', calories: 640, protein: 52, carbs: 60, fats: 14, ingredients: [
+        { name: 'Grilled Chicken', weight: '150g' },
+        { name: 'Jasmine Rice' },
+      ] },
+    });
+    expect(a.type).toBe('add_meal');
+    expect(a.note).toBe('Great high-protein lunch to hit your target.');
+    expect(a.preview).toContain('Grilled Chicken');
+    expect(a.preview).toContain('Jasmine Rice');
+    expect(a.preview).toContain('640 cal');
+  });
+
+  it('accepts the `note` key as a fallback for coach_note', () => {
+    const a = parseCoachAction({
+      type: 'update_plan',
+      note: 'Quick tweak for you.',
+      updates: [{ day: 'Tuesday', focus: 'Back', exercises: [{ name: 'Deadlift' }] }],
+    });
+    expect(a.note).toBe('Quick tweak for you.');
+  });
+
+  it('caps a very long coach_note and yields "" when absent', () => {
+    const long = parseCoachAction({
+      type: 'update_plan',
+      coach_note: 'x'.repeat(2000),
+      updates: [{ day: 'Monday', exercises: [{ name: 'Bench' }] }],
+    });
+    expect(long.note.length).toBe(400);
+
+    const missing = parseCoachAction({
+      type: 'add_meal',
+      data: { name: 'Plain', calories: 100, ingredients: [{ name: 'Egg' }] },
+    });
+    expect(missing.note).toBe('');
+  });
+});
+
 describe('formatChatMemory', () => {
   it('keeps the last N turns only', () => {
     const hist = Array.from({ length: 10 }, (_, i) => ({ role: i % 2 ? 'user' : 'ai', content: `m${i}` }));

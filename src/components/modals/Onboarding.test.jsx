@@ -74,8 +74,12 @@ describe('Onboarding', () => {
     setValue(screen.getByPlaceholderText('10'), '10');
     fireEvent.click(nextBtn());
 
-    // step 3 — defaults (maintenance / moderate) are fine; just launch
-    fireEvent.click(screen.getByRole('button', { name: /launch titan/i }));
+    // step 3 — defaults (maintenance / moderate) are fine; go to the plan reveal
+    fireEvent.click(screen.getByRole('button', { name: /see my plan/i }));
+
+    // step 4 — the "Your Plan" reveal, then start
+    expect(screen.getByText(/your plan/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /start titan/i }));
 
     expect(onComplete).toHaveBeenCalledTimes(1);
     const payload = onComplete.mock.calls[0][0];
@@ -117,8 +121,8 @@ describe('Onboarding', () => {
     expect(nextBtn()).toBeEnabled();
     fireEvent.click(nextBtn());
 
-    // step 3 — Launch triggers validation, height is negative
-    fireEvent.click(screen.getByRole('button', { name: /launch titan/i }));
+    // step 3 — "See my plan" triggers validation; the computed height is negative
+    fireEvent.click(screen.getByRole('button', { name: /see my plan/i }));
 
     expect(
       screen.getByText(/please enter a valid age, weight, and height/i)

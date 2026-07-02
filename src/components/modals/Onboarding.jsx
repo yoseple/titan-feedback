@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { ArrowRight, Activity, Target, Ruler, Weight, User } from 'lucide-react';
+import { ArrowRight, Activity, Target, Ruler, Weight, User, Flame } from 'lucide-react';
 import { calculateTDEE, calculateTargetCalories, computeMacroTargets } from '../../utils/nutrition';
 
 const Onboarding = ({ onComplete }) => {
   const [step, setStep] = useState(1);
   const [error, setError] = useState('');
+  const [computed, setComputed] = useState(null); // the calculated plan, shown on the reveal step
+  const [submitting, setSubmitting] = useState(false);
   const [data, setData] = useState({
     weight: '',
     feet: '',
@@ -17,13 +19,11 @@ const Onboarding = ({ onComplete }) => {
 
   const handleNext = () => setStep(step + 1);
   
-  const handleFinish = () => {
-    // 1. Convert Height to CM for the backend
+  // Validate + compute the plan, then show it on the reveal step (don't save yet).
+  const handleReview = () => {
     const heightCm = Math.round((parseInt(data.feet || 0) * 30.48) + (parseInt(data.inches || 0) * 2.54));
-
     // Validate positives before computing TDEE — otherwise calculateTDEE silently falls back
-    // to 180 lb / 25 y for blank/0 values, and a NEGATIVE age flips the BMR term, persisting
-    // a garbage calorie/macro target on the very first profile (the B14 guard, missing here).
+    // to 180 lb / 25 y for blank/0 values, and a NEGATIVE age flips the BMR term (the B14 guard).
     const weightVal = parseFloat(data.weight);
     const ageVal = parseFloat(data.age);
     if (!(weightVal > 0) || !(ageVal > 0) || !(heightCm > 0)) {
@@ -31,21 +31,25 @@ const Onboarding = ({ onComplete }) => {
       return;
     }
     setError('');
-
-    // 2. Calculate TDEE
     const tdee = calculateTDEE(data.weight, heightCm, data.age, data.gender, data.activityLevel);
     const target = calculateTargetCalories(tdee, data.goal);
     const macroTargets = computeMacroTargets(target, data.goal, data.weight);
+    setComputed({ ...data, height: heightCm, tdee, caloriesTarget: target, macroTargets, onboardingComplete: true });
+    setStep(4);
+  };
 
-    // 3. Save
-    onComplete({
-      ...data,
-      height: heightCm,
-      tdee,
-      caloriesTarget: target,
-      macroTargets,
-      onboardingComplete: true
-    });
+  // Persist the profile (async) with a loading + error state on the final CTA.
+  const handleLaunch = async () => {
+    if (submitting || !computed) return;
+    setSubmitting(true);
+    try {
+      await onComplete(computed);
+      // On success the app swaps in the Dashboard (this component unmounts).
+    } catch (e) {
+      console.error('Onboarding save failed', e);
+      setSubmitting(false);
+      setError('Could not save your profile — check your connection and try again.');
+    }
   };
 
   return (
@@ -53,7 +57,7 @@ const Onboarding = ({ onComplete }) => {
       <div className="max-w-md w-full bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 overflow-hidden relative">
         {/* Progress Bar */}
         <div className="h-1 bg-gray-700 w-full">
-          <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${(step / 3) * 100}%` }}></div>
+          <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${(step / 4) * 100}%` }}></div>
         </div>
 
         <div className="p-8">
@@ -152,7 +156,34 @@ const Onboarding = ({ onComplete }) => {
                  </div>
               </div>
               {error && <div className="bg-red-900/40 text-red-300 text-sm p-3 rounded-lg border border-red-800">{error}</div>}
-              <button onClick={handleFinish} className="w-full bg-red-600 hover:bg-red-500 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">Launch Titan <Activity size={18}/></button>
+              <button onClick={handleReview} className="w-full bg-red-600 hover:bg-red-500 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2">See my plan <ArrowRight size={18}/></button>
+            </div>
+          )}
+
+          {step === 4 && computed && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right">
+              <div className="text-center">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-900/30 text-emerald-400 mb-4"><Flame size={32} /></div>
+                <h2 className="text-2xl font-black text-white">Your Plan</h2>
+                <p className="text-gray-400 mt-2">Here's your personalized daily target.</p>
+              </div>
+              <div className="bg-gray-900 rounded-2xl border border-gray-700 p-6 text-center">
+                <div className="text-5xl font-black text-white">{computed.caloriesTarget}<span className="text-lg text-gray-400 font-bold"> cal</span></div>
+                <div className="text-xs text-gray-500 uppercase tracking-widest font-bold mt-1">Daily target · {computed.goal}</div>
+                <div className="grid grid-cols-3 gap-3 mt-5">
+                  {[['Protein', computed.macroTargets.protein, 'text-blue-400'], ['Carbs', computed.macroTargets.carbs, 'text-orange-400'], ['Fats', computed.macroTargets.fats, 'text-yellow-400']].map(([l, v, c]) => (
+                    <div key={l} className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+                      <div className={`text-xl font-black ${c}`}>{v}g</div>
+                      <div className="text-[10px] text-gray-500 uppercase font-bold">{l}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 text-center px-4">Calculated from your stats + goal (Mifflin-St Jeor). Fine-tune anytime in Settings.</p>
+              {error && <div className="bg-red-900/40 text-red-300 text-sm p-3 rounded-lg border border-red-800">{error}</div>}
+              <button onClick={handleLaunch} disabled={submitting} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 active:scale-95 transition">
+                {submitting ? 'Setting up…' : <>Start Titan <Activity size={18}/></>}
+              </button>
             </div>
           )}
 

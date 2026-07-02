@@ -98,7 +98,7 @@ const Dashboard = () => {
 
   // Chat State
   const [chatInput, setChatInput] = useState('');
-  const [chatHistory, setChatHistory] = useState([{ role: 'ai', content: "I am Titan. I can update your workout plans and create meals for you." }]);
+  const [chatHistory, setChatHistory] = useState([{ role: 'ai', greeting: true, content: "I'm Titan, your coach. Ask me to build a workout or plan a meal." }]);
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const [chatQuota, setChatQuota] = useState(null);
   const [weightInput, setWeightInput] = useState('');
@@ -128,6 +128,28 @@ const Dashboard = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [scannedResult, isFoodSearching, editingMeal, chefMeal, showLiftHistory, addingToMeal, setScannedResult, setAddingToMeal]);
+
+  // Personalize the coach's opening line from the user's real context — but only while it's
+  // still the default greeting, so a real conversation is never overwritten.
+  useEffect(() => {
+    if (!userProfile) return;
+    setChatHistory((p) => {
+      if (p.length !== 1 || !p[0].greeting) return p;
+      const ctx = deriveUserContext({ profile: userProfile, weightLog, foodLogs: foodLog, today: getLocalDate(new Date()) });
+      const bits = [`You're on a ${ctx.goal} plan`];
+      if (ctx.weightTrendLbsPerWeek != null) bits.push(`trending ${ctx.weightTrendLbsPerWeek >= 0 ? '+' : ''}${ctx.weightTrendLbsPerWeek} lb/wk`);
+      const intake = ctx.caloriesTarget ? `${ctx.todayCalories}/${ctx.caloriesTarget} cal` : `${ctx.todayCalories} cal`;
+      return [{ role: 'ai', greeting: true, content: `${bits.join(', ')}. Today so far: ${intake}, ${ctx.todayProtein}g protein. What are we working on?` }];
+    });
+  }, [userProfile, weightLog, foodLog]);
+
+  // Context-aware quick-chips for the coach composer.
+  const coachChips = useMemo(() => {
+    const g = userProfile?.goal;
+    if (g === 'cut') return ['High-protein, low-cal lunch', 'Fat-loss workout for today', 'Am I on track for my cut?'];
+    if (g === 'bulk') return ['High-calorie mass meal', 'Heavy push day for Monday', 'How do I gain muscle?'];
+    return ['High-protein breakfast idea', 'Give me a chest day for Monday', 'Why is protein important?'];
+  }, [userProfile?.goal]);
 
   // --- RECIPE EDITOR LOGIC ---
   const handleEditorSearch = async () => {
@@ -306,7 +328,7 @@ Recent conversation (for continuity):
 ${formatChatMemory(chatHistory, 6)}
 
 PRIME DIRECTIVE:
-You prefer ACTION over SPEECH. 
+You COACH first, then ACT. Always attach a short, specific, encouraging "coach_note" (1-2 sentences, grounded in the User Context above) to any update_plan or add_meal.
 1. If the user mentions a specific muscle group or workout day, generate a "update_plan" JSON immediately.
 2. If the user mentions hunger, specific foods, or diet goals, generate a "add_meal" JSON immediately.
 3. Only use "advice" JSON if the user asks a theoretical question (e.g., "Why is sleep important?").
@@ -316,6 +338,7 @@ RESPONSE FORMAT (STRICT JSON ONLY):
 SCENARIO 1: User says "Give me a chest workout for Monday" or "My chest is lagging"
 {
   "type": "update_plan",
+  "coach_note": "You're cutting and down ~1lb/wk — I front-loaded the heavy compound while you're fresh.",
   "updates": [
     { 
       "day": "Monday", 
@@ -332,7 +355,8 @@ SCENARIO 1: User says "Give me a chest workout for Monday" or "My chest is laggi
 SCENARIO 2: User says "I want a high protein breakfast" or "Add chicken rice to lunch"
 {
   "type": "add_meal",
-  "data": { 
+  "coach_note": "This hits ~55g protein to help you reach today's target — light on carbs to fit your cut.",
+  "data": {
       "name": "Titan High-Protein Breakfast", 
       "calories": 650, 
       "protein": 55, 
@@ -364,7 +388,9 @@ Request: "${msg}"
              setChatHistory(p => [...p, { role: 'ai', content: action.message }]);
         } else {
              setPendingAction(action);
-             setChatHistory(p => [...p, { role: 'ai', content: `${action.type === 'update_plan' ? "Here's a workout plan update — review and Apply below:" : "Here's a meal — review and Apply below:"}\n${action.preview}` }]);
+             // The spoken coach note goes in the chat bubble; the structured preview shows in
+             // the Apply card below.
+             setChatHistory(p => [...p, { role: 'ai', content: action.note || (action.type === 'update_plan' ? "Here's a plan update — review and Apply below." : "Here's a meal — review and Apply below.") }]);
         }
 
     } catch (err) {
@@ -462,6 +488,17 @@ Request: "${msg}"
   }, [activeWorkout, workoutLogs, formattedDate]);
 
   const allMeals = [...INITIAL_MEALS, ...customMeals];
+
+  // Current streak = consecutive days (ending today, or yesterday if today isn't logged yet)
+  // with any food or workout activity.
+  const streak = useMemo(() => {
+    const active = new Set([...foodLog, ...workoutLogs].map((l) => l.date).filter(Boolean));
+    const d = new Date();
+    if (!active.has(getLocalDate(d))) d.setDate(d.getDate() - 1);
+    let s = 0;
+    while (active.has(getLocalDate(d))) { s++; d.setDate(d.getDate() - 1); }
+    return s;
+  }, [foodLog, workoutLogs]);
   const shoppingList = useMemo(() => {
     if (selectedMealIds.length === 0) return {};
     const categories = {};
@@ -580,7 +617,21 @@ Request: "${msg}"
               ) : (
                   <div className="text-center text-gray-500 py-10 flex flex-col items-center gap-4">
                       <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center"><Activity className="w-8 h-8 opacity-50"/></div>
-                      <p>Rest Day. Recover.</p>
+                      <p className="font-medium text-gray-400">Nothing planned for {viewDate.toLocaleDateString('en-US', { weekday: 'long' })}.</p>
+                      <div className="flex flex-col gap-2 w-full max-w-xs">
+                          <button
+                              onClick={() => {
+                                  const day = viewDate.toLocaleDateString('en-US', { weekday: 'long' });
+                                  const id = day.toLowerCase();
+                                  actions.updateWorkoutPlan(id, { id, day, focus: 'New Workout', exercises: [{ name: 'New Exercise', sets: '3', reps: '10', tips: '', type: 'weighted' }] });
+                                  setEditingDayId(id);
+                              }}
+                              className="bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold active:scale-95 transition"
+                          >
+                              Plan a workout
+                          </button>
+                          <button onClick={() => setActiveTab('coach')} className="bg-gray-800 border border-gray-700 text-gray-300 py-3 rounded-xl font-bold active:scale-95 transition">Ask Titan to build one</button>
+                      </div>
                   </div>
               )}
             </div>
@@ -691,6 +742,14 @@ Request: "${msg}"
           {/* --- PROGRESS TAB (rolling analytics) --- */}
           {activeTab === 'progress' && (
             <div className="space-y-6 animate-in fade-in duration-300 pb-safe-bottom">
+               <div className="bg-gradient-to-r from-orange-900/20 to-slate-900 border border-orange-500/20 p-5 rounded-2xl flex items-center justify-between shadow-lg">
+                   <div>
+                       <div className="text-3xl font-black text-white">{streak} <span className="text-base font-bold text-orange-400">day{streak === 1 ? '' : 's'}</span></div>
+                       <div className="text-xs text-gray-400 uppercase tracking-widest font-bold mt-1">Current streak</div>
+                   </div>
+                   <Flame className="w-10 h-10 text-orange-500 fill-orange-500/30" />
+               </div>
+
                <ConsistencyHeatmap workoutLogs={workoutLogs} foodLogs={foodLog} />
 
                {/* --- BODYWEIGHT --- */}
@@ -755,13 +814,7 @@ Request: "${msg}"
             <div className="h-[calc(100dvh-140px)] flex flex-col animate-in fade-in duration-300">
                 <div className="flex-1 bg-gray-800 rounded-t-xl border border-gray-700 border-b-0 overflow-y-auto p-4 space-y-4 shadow-inner">
                     <div className="flex justify-center mb-4"><span className="text-xs font-bold text-gray-600 bg-gray-900 px-3 py-1 rounded-full uppercase tracking-wider">Titan AI Active{chatQuota != null && ` · ${chatQuota} chats left`}</span></div>
-                    {chatHistory.length <= 1 && !isChatProcessing && (
-                        <div className="flex flex-wrap gap-2 justify-center mb-2">
-                            {['Give me a chest day for Monday', 'High-protein breakfast idea', 'Why is protein important?'].map(s => (
-                                <button key={s} onClick={() => handleChatSubmit(null, s)} className="text-xs bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full hover:border-blue-500/50 active:scale-95 transition">{s}</button>
-                            ))}
-                        </div>
-                    )}
+                    {/* quick-chips are a persistent row above the composer (below) */}
                     {chatHistory.map((m, i) => (
                         <div key={i} className={`flex ${m.role==='user'?'justify-end':'justify-start'}`}>
                             <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${m.role==='user'?'bg-blue-600 text-white rounded-br-none':'bg-gray-700 text-gray-200 rounded-bl-none'}`}>
@@ -796,6 +849,15 @@ Request: "${msg}"
                     <div className="mx-3 mb-2 flex items-center justify-between bg-slate-800/70 border border-gray-700 rounded-xl px-3 py-2 animate-in fade-in">
                         <span className="text-xs text-gray-400 truncate pr-2">Applied a change to your {lastUndo.label}.</span>
                         <button onClick={undoLastChange} className="text-xs font-bold text-blue-400 hover:text-blue-300 uppercase tracking-wide shrink-0">↩︎ Undo</button>
+                    </div>
+                )}
+
+                {/* Persistent, context-aware quick-chips */}
+                {!isChatProcessing && !pendingAction && chatQuota !== 0 && (
+                    <div className="px-3 pb-2 flex gap-2 overflow-x-auto">
+                        {coachChips.map(s => (
+                            <button key={s} onClick={() => handleChatSubmit(null, s)} className="shrink-0 text-xs bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-full hover:border-blue-500/50 active:scale-95 transition">{s}</button>
+                        ))}
                     </div>
                 )}
 

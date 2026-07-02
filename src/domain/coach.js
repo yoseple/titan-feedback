@@ -66,6 +66,10 @@ const str = (v, max) => String(v ?? '').slice(0, max);
 export const parseCoachAction = (data) => {
   if (!data || typeof data !== 'object') return { type: 'advice', message: 'Sorry, I did not get that.' };
 
+  // A short spoken coaching line the model attaches to an action (rendered above the
+  // Apply card) so Titan coaches, not just mutates.
+  const note = str(data.coach_note || data.note || '', 400);
+
   if (data.type === 'update_plan') {
     const updates = (Array.isArray(data.updates) ? data.updates : []).slice(0, 7).map((u) => {
       const id = normalizeDayId(u.id || u.day);
@@ -89,8 +93,12 @@ export const parseCoachAction = (data) => {
     // can't render and that undo can't remove.
     }).filter((u) => u.id && DAYS.includes(u.id));
     if (!updates.length) return { type: 'advice', message: "I couldn't build a valid plan update." };
-    const preview = updates.map((u) => `${(u.day || u.id)} — ${u.focus || 'Workout'} (${u.exercises.length} exercises)`).join('\n');
-    return { type: 'update_plan', updates, preview };
+    // Show the actual exercises so the user can trust the plan before applying.
+    const preview = updates.map((u) => {
+      const lines = u.exercises.map((ex) => `  • ${ex.name}${ex.sets || ex.reps ? ` — ${ex.sets || '?'}×${ex.reps || '?'}` : ''}`).join('\n');
+      return `${(u.day || u.id)} — ${u.focus || 'Workout'}\n${lines}`;
+    }).join('\n\n');
+    return { type: 'update_plan', updates, preview, note };
   }
 
   if (data.type === 'add_meal') {
@@ -102,8 +110,10 @@ export const parseCoachAction = (data) => {
       instructions: str(d.instructions, 2000),
       tags: [],
     };
-    const preview = `${meal.name} — ${meal.calories} cal · ${meal.protein}P / ${meal.carbs}C / ${meal.fats}F · ${meal.ingredients.length} ingredients`;
-    return { type: 'add_meal', meal, preview };
+    const ingLines = meal.ingredients.slice(0, 12)
+      .map((i) => `  • ${str(i.name, 40)}${i.weight ? ` (${str(i.weight, 20)})` : ''}`).join('\n');
+    const preview = `${meal.name} — ${meal.calories} cal · ${meal.protein}P / ${meal.carbs}C / ${meal.fats}F${ingLines ? `\n${ingLines}` : ''}`;
+    return { type: 'add_meal', meal, preview, note };
   }
 
   return { type: 'advice', message: str(data.message || 'Done.', 4000) };
