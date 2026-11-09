@@ -10,9 +10,9 @@ Titan has a persistent "brain" — an Obsidian knowledge base that is the source
 C:\Users\yosep\AI-Software-Factory\00-Obsidian-Vault\07-Build-Tickets\Titan\
 ```
 
-Notes: `Resume Here.md` (▶ OPEN FIRST — current state + next actions), `Titan Dashboard.md` (hub), `Titan Facts.md` (architecture ground-truth), `Bug Register.md`, `Improvement Roadmap.md`, `Build Log.md` (append-only, one entry per commit/phase, newest on top), `Decisions & Plan.md`, `Owner Setup (Firebase-Google).md` (console/deploy runbook).
+Notes: `Resume Here.md` (▶ OPEN FIRST — current state + next actions), `Titan Dashboard.md` (hub), `Titan Facts.md` (architecture ground-truth), `Bug Register.md`, `Improvement Roadmap.md`, `Build Log.md` (append-only, one entry per commit/phase, newest on top), `Decisions & Plan.md`, `UI-UX Plan.md` (redesign plan), `Owner Setup (Firebase-Google).md` (console/deploy runbook).
 
-**NON-NEGOTIABLE — update the brain after EVERY change.** The owner has made this permanent: any change we make to Titan (every commit, every phase, every deploy, every decision) MUST be written back to the brain **before the turn ends** so we can always resume exactly where we left off. Do not treat a task as done until the brain reflects it.
+**NON-NEGOTIABLE — update the brain after EVERY change.** The owner has made this permanent: any change we make to Titan (every commit, every phase, every deploy, every decision) MUST be written back to the brain **before the turn ends** so we can always resume exactly where we left off. Do not treat a task as done until the brain reflects it. (If the vault path doesn't exist on this machine, e.g. someone else's clone of this public repo, skip this.)
 
 On any Titan change, update:
 1. **`Build Log.md`** — append a `### <hash> — <title>` entry per commit and a `## PHASE …` entry per phase (newest on top).
@@ -32,5 +32,5 @@ At the **start** of any Titan session, read `Resume Here.md` first.
 
 - Test: `npm test` (Vitest — pure domain math in `src/domain/`). Build: `npm run build`. Lint: `npm run lint` (non-blocking; CI gates on test + build).
 - Domain logic is pure + tested in `src/domain/{foodMath,nutritionMath,coach,foodSearch,trends}.js`; flows in `src/hooks/`.
-- Cloud Functions (`functions/index.js`): `generateAI`, `submitTicket`, `searchFood` (callables) + `aggregateDailyFood` (Firestore trigger).
+- Backend: one Cloudflare Worker, `workers/titan-api` (since `28e7bb9`). It handles Firebase ID-token auth, per-user daily quota, food search and barcode lookup, the Gemini AI coach and GitHub feedback tickets. The client calls it through `src/lib/workerClient.js`. Firebase stays on Spark for Auth, Firestore and Hosting. The old `functions/` callables (`generateAI`, `submitTicket`, `searchFood`, `aggregateDailyFood`) are retired.
 - Deploy/console steps (billing, secrets, Google sign-in, App Check) are owner-side — see `Owner Setup (Firebase-Google).md` in the brain.
