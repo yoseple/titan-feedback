@@ -46,6 +46,8 @@ Board rules:
 - **During:** keep statuses current, and unblock or re-assign when an owner is stuck.
 - **End of a task:** the board is updated, the Obsidian brain is updated (Build Log, Resume Here, Dashboard, Bug Register), and the Supervisor report is written. Nothing is "done" until all three are.
 
+**Prompt flow v2 applies** (Supervisor decision, 2026-11-11): Read section 4a of the global `~/.claude/agents/project-manager.md` before planning or reporting. The full flow is `00-Supervisor\How a Prompt Flows.md` in the vault. That means triage (quick / feature / project, risk tier, WIP check, via the `prompt-triage` skill), risk-tiered review, the matches-the-ask gate before ship, decision cards in the Supervisor's task list in the vault instead of interruptions, backup (pushed to a remote) as part of ship, and a phone-sized REPORT CARD at the top of every report. Where this file conflicts with those rules, the v2 rules win.
+
 ## 5. Report to the Supervisor (fixed format)
 At the end of every task, and whenever asked, reply with this, and write it into the portfolio board (section 6):
 
