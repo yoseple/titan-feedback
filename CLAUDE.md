@@ -23,6 +23,13 @@ On any Titan change, update:
 
 At the **start** of any Titan session, read `Resume Here.md` first.
 
+## Project manager (standing rule)
+
+- Titan's PM is the `project-manager` agent: `.claude/agents/project-manager.md` (tailored from `~/.claude/agents/project-manager.md`).
+- It reports to **Joseph (Supervisor)** in the fixed PM REPORT format at the end of every task and whenever he asks for status.
+- It owns the board: the vault `07-Build-Tickets\Titan\Task Board.md` (bugs keep their `B##` keys from `Bug Register.md`). Every open task has exactly one owner from the Dashboard's **Team & Roles** section.
+- After every task it updates Titan's row in `00-Obsidian-Vault\00-Supervisor\Portfolio Board.md` and adds the report to `00-Supervisor\PM Reports\<YYYY-MM>.md`.
+
 ## 🛠️ How we work (owner instructions)
 
 - **Use agents/subagents heavily** — parallel multi-agent workflows for audits, reviews, and builds.
